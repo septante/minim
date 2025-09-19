@@ -1,26 +1,23 @@
 #![forbid(unsafe_code)]
 
-use color_eyre::Result;
-use crossterm::event::{self, Event};
-use ratatui::{DefaultTerminal, Frame};
+use clap::Parser;
+use color_eyre::{Result, eyre::Context};
+
+use minim::{Args, Player};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-    let terminal = ratatui::init();
-    let result = run(terminal);
-    ratatui::restore();
-    result
-}
-
-fn run(mut terminal: DefaultTerminal) -> Result<()> {
-    loop {
-        terminal.draw(render)?;
-        if matches!(event::read()?, Event::Key(_)) {
-            break Ok(());
+    let mut terminal = ratatui::init();
+    let args = Args::parse();
+    match Player::new(args) {
+        Ok(mut player) => {
+            let result = player.run(&mut terminal);
+            ratatui::restore();
+            result.wrap_err("")
+        }
+        Err(e) => {
+            ratatui::restore();
+            Err(e)
         }
     }
-}
-
-fn render(frame: &mut Frame) {
-    frame.render_widget("hello world", frame.area());
 }
