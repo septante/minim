@@ -17,7 +17,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::Text,
-    widgets::{Block, Borders, List, Row, Table, TableState},
+    widgets::{Block, Borders, Row, Table, TableState},
 };
 use rodio::{OutputStream, Sink};
 use walkdir::WalkDir;
@@ -247,14 +247,25 @@ impl Player {
     }
 
     fn render_sidebar(&mut self, frame: &mut Frame, area: Rect) {
-        let list = List::new(
-            self.queue
-                .iter()
-                .map(|track| track.cached_field_string(CachedField::Title)),
+        let widths = [
+            Constraint::Min(3),
+            Constraint::Percentage(90),
+            Constraint::Min(6),
+        ];
+        let table = Table::new(
+            self.queue.iter().enumerate().map(|(index, track)| {
+                let index = index + 1;
+                Row::new(vec![
+                    Text::from(format!("{index}")),
+                    Text::from(track.cached_field_string(CachedField::Title)),
+                    Text::from(track.cached_field_string(CachedField::Duration)),
+                ])
+            }),
+            widths,
         );
         let block = Block::new().borders(Borders::all());
 
-        frame.render_widget(list.block(block), area);
+        frame.render_widget(table.block(block), area);
     }
 }
 
