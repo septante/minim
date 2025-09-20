@@ -131,8 +131,38 @@ impl Player {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit = true,
+            KeyCode::Char('j') | KeyCode::Down => self.next_table_row(),
+            KeyCode::Char('k') | KeyCode::Up => self.previous_table_row(),
             _ => {}
         }
+    }
+
+    fn next_table_row(&mut self) {
+        let i = match self.table_state.selected() {
+            Some(i) => {
+                if i >= self.tracks.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+    }
+
+    fn previous_table_row(&mut self) {
+        let i = match self.table_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.tracks.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.table_state.select(Some(i));
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
