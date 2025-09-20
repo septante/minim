@@ -144,6 +144,18 @@ impl Player {
             KeyCode::Char('q') => self.exit = true,
             KeyCode::Char('j') | KeyCode::Down => self.next_table_row(),
             KeyCode::Char('k') | KeyCode::Up => self.previous_table_row(),
+            KeyCode::Char('p') => {
+                let sink = &self.sink;
+                if sink.is_paused() {
+                    sink.play();
+                } else {
+                    sink.pause();
+                }
+            }
+            KeyCode::Char('n') => {
+                self.sink.skip_one();
+                *self.queue_index.lock().unwrap() += 1;
+            }
             KeyCode::Enter => {
                 let track = self
                     .tracks
