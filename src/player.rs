@@ -1,4 +1,10 @@
-use std::{path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    fs,
+    io::BufReader,
+    path::PathBuf,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 use clap::Parser;
 use color_eyre::{
@@ -15,10 +21,10 @@ use ratatui::{
     text::{Line, Text},
     widgets::{Block, Paragraph, Row, Table, TableState, Widget},
 };
-use rodio::OutputStream;
+use rodio::{OutputStream, Sink};
 use walkdir::WalkDir;
 
-use crate::files::{CachedField, Track};
+use crate::files::{CachedField, Track, WrappedSource};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -50,12 +56,15 @@ pub struct Player {
     args: Args,
     library_root: PathBuf,
     tracks: Vec<Track>,
+    queue: Vec<Track>,
+    queue_index: Arc<Mutex<usize>>,
 
     // UI related state
     theme: Theme,
     exit: bool,
     table_state: TableState,
 
+    sink: Sink,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
     // See https://github.com/RustAudio/rodio/issues/525
     _stream: OutputStream,
@@ -66,7 +75,6 @@ impl Player {
         let (stream, handle) =
             rodio::OutputStream::try_default().wrap_err("Error opening rodio output stream")?;
         let sink = rodio::Sink::try_new(&handle).wrap_err("Error creating new sink")?;
-        let shared_sink = Arc::new(sink);
 
         let library_root;
         if let Some(ref dir) = args.dir {
@@ -81,9 +89,12 @@ impl Player {
             args,
             library_root,
             tracks,
+            queue: Vec::new(),
+            queue_index: Arc::new(Mutex::new(0)),
             theme: Theme::default(),
             exit: false,
             table_state: TableState::default().with_selected(0),
+            sink,
             _stream: stream,
         };
 
@@ -133,6 +144,26 @@ impl Player {
             KeyCode::Char('q') => self.exit = true,
             KeyCode::Char('j') | KeyCode::Down => self.next_table_row(),
             KeyCode::Char('k') | KeyCode::Up => self.previous_table_row(),
+            KeyCode::Enter => {
+                let track = self
+                    .tracks
+                    .get(self.table_state.selected().expect("No selected row?"))
+                    .expect("Should be valid index");
+
+                let file = fs::File::open(&track.path)
+                    .expect("Path should be valid, since we imported these files at startup");
+
+                // Add song to queue. TODO: display error message when attempting to open an unsupported file
+                if let Ok(decoder) = rodio::Decoder::new(BufReader::new(file)) {
+                    let queue_index = self.queue_index.clone();
+                    let source = WrappedSource::new(decoder, move || {
+                        *queue_index.lock().unwrap() += 1;
+                    });
+                    self.sink.append(source);
+                }
+
+                self.queue.push(track.clone());
+            }
             _ => {}
         }
     }
