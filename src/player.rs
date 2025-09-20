@@ -14,12 +14,10 @@ use color_eyre::{
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
-    buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style, Stylize},
-    symbols::border,
-    text::{Line, Text},
-    widgets::{Block, Borders, List, Paragraph, Row, Table, TableState, Widget},
+    style::{Color, Style},
+    text::Text,
+    widgets::{Block, Borders, List, Row, Table, TableState},
 };
 use rodio::{OutputStream, Sink};
 use walkdir::WalkDir;
@@ -85,7 +83,7 @@ impl Player {
 
         let tracks = Self::get_tracks_from_disk(&library_root);
 
-        let mut player = Player {
+        let player = Player {
             args,
             library_root,
             tracks,
