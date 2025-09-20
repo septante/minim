@@ -19,7 +19,7 @@ use ratatui::{
     style::{Color, Style, Stylize},
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Paragraph, Row, Table, TableState, Widget},
+    widgets::{Block, Borders, List, Paragraph, Row, Table, TableState, Widget},
 };
 use rodio::{OutputStream, Sink};
 use walkdir::WalkDir;
@@ -119,12 +119,16 @@ impl Player {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let primary_tab_layout =
+            &Layout::horizontal([Constraint::Percentage(80), Constraint::Min(15)]);
         let main_panel_layout =
             &Layout::vertical([Constraint::Percentage(100), Constraint::Min(10)]);
 
-        let main_panel = main_panel_layout.split(frame.area());
+        let primary_tab = primary_tab_layout.split(frame.area());
+        let main_panel = main_panel_layout.split(primary_tab[0]);
 
         self.render_table(frame, main_panel[0]);
+        self.render_sidebar(frame, primary_tab[1]);
     }
 
     fn handle_events(&mut self) -> std::io::Result<()> {
@@ -242,6 +246,17 @@ impl Player {
             .row_highlight_style(selected_row_style);
 
         frame.render_stateful_widget(table, area, &mut self.table_state);
+    }
+
+    fn render_sidebar(&mut self, frame: &mut Frame, area: Rect) {
+        let list = List::new(
+            self.queue
+                .iter()
+                .map(|track| track.cached_field_string(CachedField::Title)),
+        );
+        let block = Block::new().borders(Borders::all());
+
+        frame.render_widget(list.block(block), area);
     }
 }
 
