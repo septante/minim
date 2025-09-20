@@ -13,9 +13,11 @@ use ratatui::{
     style::Stylize,
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Block, Paragraph, TableState, Widget},
 };
 use rodio::OutputStream;
+
+use crate::files::Track;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -29,9 +31,12 @@ pub struct Args {
 }
 
 pub struct Player {
-    exit: bool,
     args: Args,
     library_root: PathBuf,
+    tracks: Vec<Track>,
+    exit: bool,
+    table_state: TableState,
+
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
     // See https://github.com/RustAudio/rodio/issues/525
     _stream: OutputStream,
@@ -52,9 +57,11 @@ impl Player {
         }
 
         let mut player = Player {
-            exit: false,
             args,
             library_root,
+            tracks: Vec::new(),
+            exit: false,
+            table_state: TableState::default(),
             _stream: stream,
         };
 
