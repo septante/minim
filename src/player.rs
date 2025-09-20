@@ -10,7 +10,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::Stylize,
+    style::{Color, Style, Stylize},
     symbols::border,
     text::{Line, Text},
     widgets::{Block, Paragraph, Row, Table, TableState, Widget},
@@ -31,10 +31,28 @@ pub struct Args {
     disable_cache: bool,
 }
 
+#[non_exhaustive]
+struct Theme {
+    table_selected_row_bg: Color,
+    table_selected_row_fg: Color,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            table_selected_row_bg: Color::Blue,
+            table_selected_row_fg: Color::Black,
+        }
+    }
+}
+
 pub struct Player {
     args: Args,
     library_root: PathBuf,
     tracks: Vec<Track>,
+
+    // UI related state
+    theme: Theme,
     exit: bool,
     table_state: TableState,
 
@@ -63,8 +81,9 @@ impl Player {
             args,
             library_root,
             tracks,
+            theme: Theme::default(),
             exit: false,
-            table_state: TableState::default(),
+            table_state: TableState::default().with_selected(0),
             _stream: stream,
         };
 
@@ -117,11 +136,25 @@ impl Player {
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
+        let selected_row_style = Style::default()
+            .bg(self.theme.table_selected_row_bg)
+            .fg(self.theme.table_selected_row_fg);
+
+        let header = ["Title", "Artist", "Duration"]
+            .into_iter()
+            .map(ratatui::widgets::Cell::from)
+            .collect::<Row>()
+            .bottom_margin(1);
+
         let rows = self.tracks.iter().map(|track| {
             Row::new(vec![
-                track.cached_field_string(CachedField::Title),
-                track.cached_field_string(CachedField::Artist),
-                track.cached_field_string(CachedField::Duration),
+                Text::from(track.cached_field_string(CachedField::Title)),
+                Text::from(track.cached_field_string(CachedField::Artist)),
+                Text::from(format!(
+                    "{} ",
+                    track.cached_field_string(CachedField::Duration)
+                ))
+                .right_aligned(),
             ])
         });
 
@@ -131,7 +164,9 @@ impl Player {
             Constraint::Min(9),
         ];
 
-        let table = Table::new(rows, widths);
+        let table = Table::new(rows, widths)
+            .header(header)
+            .row_highlight_style(selected_row_style);
 
         frame.render_stateful_widget(table, area, &mut self.table_state);
     }
