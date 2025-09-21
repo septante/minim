@@ -165,6 +165,9 @@ impl Player {
                     sink.pause();
                 }
             }
+            KeyCode::Char('b') => {
+                self.previous_track();
+            }
             KeyCode::Char('n') => {
                 self.sink.skip_one();
                 *self.queue_index.lock().unwrap() += 1;
@@ -173,24 +176,47 @@ impl Player {
                 let track = self
                     .tracks
                     .get(self.table_state.selected().expect("No selected row?"))
-                    .expect("Should be valid index");
+                    .expect("Should be valid index")
+                    .clone();
 
-                let file = fs::File::open(&track.path)
-                    .expect("Path should be valid, since we imported these files at startup");
-
-                // Add song to queue. TODO: display error message when attempting to open an unsupported file
-                if let Ok(decoder) = rodio::Decoder::try_from(file) {
-                    let queue_index = self.queue_index.clone();
-                    let source = WrappedSource::new(decoder, move || {
-                        *queue_index.lock().unwrap() += 1;
-                    });
-                    self.sink.append(source);
-                }
+                self.queue_track(&track);
 
                 self.queue.push(track.clone());
             }
             _ => {}
         }
+    }
+
+    fn queue_track(&mut self, track: &Track) {
+        let file = fs::File::open(&track.path)
+            .expect("Path should be valid, since we imported these files at startup");
+
+        // Add song to queue. TODO: display error message when attempting to open an unsupported file
+        if let Ok(decoder) = rodio::Decoder::try_from(file) {
+            let queue_index = self.queue_index.clone();
+            let source = WrappedSource::new(decoder, move || {
+                *queue_index.lock().unwrap() += 1;
+            });
+            self.sink.append(source);
+        }
+    }
+
+    fn previous_track(&mut self) {
+        if *self.queue_index.lock().unwrap() > 0 {
+            *self.queue_index.lock().unwrap() -= 1;
+        }
+
+        self.sink.clear();
+
+        let iter = self
+            .queue
+            .clone()
+            .into_iter()
+            .skip(*self.queue_index.lock().unwrap());
+        for track in iter {
+            self.queue_track(&track);
+        }
+        self.sink.play();
     }
 
     fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
