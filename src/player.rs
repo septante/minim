@@ -4,6 +4,7 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use clap::Parser;
@@ -15,7 +16,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::Text,
-    widgets::{Block, Borders, Row, Table, TableState},
+    widgets::{Block, Borders, LineGauge, Row, Table, TableState},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use rodio::{OutputStream, OutputStreamBuilder, Sink};
@@ -38,6 +39,8 @@ pub struct Args {
 struct Theme {
     table_selected_row_bg: Color,
     table_selected_row_fg: Color,
+    progress_bar_unfilled: Color,
+    progress_bar_filled: Color,
 }
 
 impl Default for Theme {
@@ -45,6 +48,8 @@ impl Default for Theme {
         Self {
             table_selected_row_bg: Color::Blue,
             table_selected_row_fg: Color::Black,
+            progress_bar_unfilled: Color::White,
+            progress_bar_filled: Color::Blue,
         }
     }
 }
@@ -127,11 +132,29 @@ impl Player {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
-        while !self.exit {
+        let tick_rate = Duration::from_millis(250);
+        let mut last_tick = Instant::now();
+
+        loop {
             terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
+            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+            if event::poll(timeout)? {
+                self.handle_events()?;
+            }
+
+            if last_tick.elapsed() >= tick_rate {
+                self.on_tick();
+                last_tick = Instant::now();
+            }
+
+            if self.exit {
+                return Ok(());
+            }
         }
-        Ok(())
+    }
+
+    fn on_tick(&mut self) {
+        // Put any update things here
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -140,11 +163,12 @@ impl Player {
         let main_panel_layout =
             &Layout::vertical([Constraint::Percentage(100), Constraint::Min(10)]);
 
-        let primary_tab = primary_tab_layout.split(frame.area());
-        let main_panel = main_panel_layout.split(primary_tab[0]);
+        let panel_splits = main_panel_layout.split(frame.area());
+        let primary_tab = primary_tab_layout.split(panel_splits[0]);
 
-        self.render_table(frame, main_panel[0]);
+        self.render_table(frame, primary_tab[0]);
         self.render_sidebar(frame, primary_tab[1]);
+        self.render_status_bar(frame, panel_splits[1]);
     }
 
     fn handle_events(&mut self) -> std::io::Result<()> {
@@ -189,6 +213,10 @@ impl Player {
         }
     }
 
+    fn now_playing(&self) -> Option<&Track> {
+        self.queue.get(*self.queue_index.lock().unwrap())
+    }
+
     fn queue_track(&mut self, track: &Track) {
         let file = fs::File::open(&track.path)
             .expect("Path should be valid, since we imported these files at startup");
@@ -196,9 +224,10 @@ impl Player {
         // Add song to queue. TODO: display error message when attempting to open an unsupported file
         if let Ok(decoder) = rodio::Decoder::try_from(file) {
             let queue_index = self.queue_index.clone();
-            let source = WrappedSource::new(decoder, move || {
+            let on_track_end = move || {
                 *queue_index.lock().unwrap() += 1;
-            });
+            };
+            let source = WrappedSource::new(decoder, on_track_end);
             self.sink.append(source);
         }
     }
@@ -308,6 +337,29 @@ impl Player {
         if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
             self.display_track_art(&track.clone());
         }
+    }
+
+    fn render_status_bar(&mut self, frame: &mut Frame, area: Rect) {
+        let track = self.now_playing();
+        let (label, ratio) = match track {
+            Some(track) => {
+                let time = self.sink.get_pos();
+                let duration = track.duration;
+                let ratio = time.as_secs() as f64 / duration.as_secs() as f64;
+
+                let time = Track::format_duration(&time);
+                let duration = Track::format_duration(&duration);
+                (format!("{time}/{duration}"), ratio)
+            }
+            None => ("0:00/0:00".to_string(), 0.0),
+        };
+
+        let progress_bar = LineGauge::default()
+            .filled_style(Style::default().fg(self.theme.progress_bar_filled))
+            .unfilled_style(Style::default().fg(self.theme.progress_bar_unfilled))
+            .ratio(ratio)
+            .label(label);
+        frame.render_widget(progress_bar, area);
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {

@@ -70,12 +70,19 @@ pub(crate) struct Track {
     title: Option<String>,
     artist: Option<String>,
     album: Option<String>,
-    duration: u64,
+    pub duration: Duration,
 }
 
 impl Track {
     fn tag_to_string(tag: Option<Cow<str>>) -> Option<String> {
         tag.as_deref().map(|x| x.to_owned())
+    }
+
+    pub(crate) fn format_duration(duration: &Duration) -> String {
+        let secs = duration.as_secs();
+        let mins = secs / 60;
+        let secs = secs % 60;
+        format!("{mins}:{:0>2}", secs)
     }
 
     pub(crate) fn cached_field_string(&self, field: CachedField) -> String {
@@ -92,12 +99,7 @@ impl Track {
                 }
             }
             CachedField::Artist => self.artist.clone().unwrap_or_default(),
-            CachedField::Duration => {
-                let secs = self.duration;
-                let mins = secs / 60;
-                let secs = secs % 60;
-                format!("{mins}:{:0>2}", secs)
-            }
+            CachedField::Duration => Self::format_duration(&self.duration),
             _ => {
                 if let Ok(key) = field.try_into() {
                     if let Ok(s) = self.tag_string_from_track(key) {
@@ -199,7 +201,7 @@ impl TryFrom<PathBuf> for Track {
                 title: Self::tag_to_string(tag.title()),
                 artist: Self::tag_to_string(tag.artist()),
                 album: Self::tag_to_string(tag.album()),
-                duration: properties.duration().as_secs(),
+                duration: properties.duration(),
             }
         })
     }
