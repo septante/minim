@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    cmp::Ordering,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -134,6 +135,22 @@ impl Track {
             .ok_or(eyre!("Couldn't find tag"))?;
 
         Ok(tag.pictures().to_vec())
+    }
+
+    // Adapted from https://stackoverflow.com/questions/46512227/sort-a-vector-with-a-comparator-which-changes-its-behavior-dynamically/46514082#46514082
+    // TODO: Allow inverting the sort
+    pub fn compare_by_fields(a: &Self, b: &Self, fields: Vec<CachedField>) -> Ordering {
+        fields.iter().fold(Ordering::Equal, |prev, &field| {
+            prev.then_with(|| match field {
+                CachedField::Title => a.title.cmp(&b.title),
+                CachedField::Artist => a.artist.cmp(&b.artist),
+                CachedField::Album => a.album.cmp(&b.album),
+                // CachedField::Year => todo!(),
+                // CachedField::Genre => todo!(),
+                CachedField::Duration => a.duration.cmp(&b.duration),
+                _ => Ordering::Equal,
+            })
+        })
     }
 }
 

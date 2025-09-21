@@ -81,7 +81,14 @@ impl Player {
             library_root = dirs::audio_dir().ok_or(eyre!("Couldn't find music folder"))?;
         }
 
-        let tracks = Self::get_tracks_from_disk(&library_root);
+        let mut tracks = Self::get_tracks_from_disk(&library_root);
+        tracks.sort_by(|a, b| {
+            Track::compare_by_fields(
+                a,
+                b,
+                vec![CachedField::Artist, CachedField::Album, CachedField::Title],
+            )
+        });
 
         let picker = Picker::from_query_stdio()?;
 
