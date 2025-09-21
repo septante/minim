@@ -165,13 +165,8 @@ impl Player {
                     sink.pause();
                 }
             }
-            KeyCode::Char('b') => {
-                self.previous_track();
-            }
-            KeyCode::Char('n') => {
-                self.sink.skip_one();
-                *self.queue_index.lock().unwrap() += 1;
-            }
+            KeyCode::Char('b') => self.previous_track(),
+            KeyCode::Char('n') => self.next_track(),
             KeyCode::Enter => {
                 let track = self
                     .tracks
@@ -201,12 +196,24 @@ impl Player {
         }
     }
 
-    fn previous_track(&mut self) {
-        if *self.queue_index.lock().unwrap() > 0 {
-            *self.queue_index.lock().unwrap() -= 1;
+    fn next_track(&mut self) {
+        self.sink.skip_one();
+        let mut index = self.queue_index.lock().unwrap();
+        *index += 1;
+        if *index > self.queue.len() {
+            *index = self.queue.len();
         }
+    }
 
+    fn previous_track(&mut self) {
         self.sink.clear();
+
+        {
+            let mut index = self.queue_index.lock().unwrap();
+            if *index > 0 {
+                *index -= 1;
+            }
+        }
 
         let iter = self
             .queue
