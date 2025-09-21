@@ -41,6 +41,7 @@
             buildInputs = [
               # rust-bin.stable.latest.default
               rust-toolchain
+              rust-analyzer
 
               # Needed for rodio to work with ALSA
               pkg-config
