@@ -206,7 +206,6 @@ impl<S, F> WrappedSource<S, F> {
 impl<S, F> Iterator for WrappedSource<S, F>
 where
     S: Source,
-    S::Item: Sample,
     F: FnMut(),
 {
     type Item = S::Item;
@@ -229,13 +228,8 @@ where
 impl<S, F> Source for WrappedSource<S, F>
 where
     S: Source,
-    S::Item: Sample,
     F: FnMut(),
 {
-    fn current_frame_len(&self) -> Option<usize> {
-        self.source.current_frame_len()
-    }
-
     fn channels(&self) -> u16 {
         self.source.channels()
     }
@@ -246,5 +240,9 @@ where
 
     fn total_duration(&self) -> Option<Duration> {
         self.source.total_duration()
+    }
+
+    fn current_span_len(&self) -> Option<usize> {
+        self.source.current_span_len()
     }
 }

@@ -1,16 +1,13 @@
 use std::{
     fs,
-    io::{BufReader, Cursor},
+    io::Cursor,
     path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use clap::Parser;
-use color_eyre::{
-    Result,
-    eyre::{Context, eyre},
-};
+use color_eyre::{Result, eyre::eyre};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use image::{DynamicImage, ImageBuffer, ImageDecoder, Rgb, codecs::jpeg::JpegDecoder};
 use ratatui::{
@@ -21,7 +18,7 @@ use ratatui::{
     widgets::{Block, Borders, Row, Table, TableState},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
-use rodio::{OutputStream, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use walkdir::WalkDir;
 
 use crate::files::{CachedField, Track, WrappedSource};
@@ -74,9 +71,8 @@ pub struct Player {
 
 impl Player {
     pub fn new(args: Args) -> Result<Self> {
-        let (stream, handle) =
-            rodio::OutputStream::try_default().wrap_err("Error opening rodio output stream")?;
-        let sink = rodio::Sink::try_new(&handle).wrap_err("Error creating new sink")?;
+        let stream_handle = OutputStreamBuilder::open_default_stream()?;
+        let sink = rodio::Sink::connect_new(stream_handle.mixer());
 
         let library_root;
         if let Some(ref dir) = args.dir {
@@ -108,7 +104,7 @@ impl Player {
             picker,
             image_state,
             sink,
-            _stream: stream,
+            _stream: stream_handle,
         };
 
         Ok(player)
@@ -183,7 +179,7 @@ impl Player {
                     .expect("Path should be valid, since we imported these files at startup");
 
                 // Add song to queue. TODO: display error message when attempting to open an unsupported file
-                if let Ok(decoder) = rodio::Decoder::new(BufReader::new(file)) {
+                if let Ok(decoder) = rodio::Decoder::try_from(file) {
                     let queue_index = self.queue_index.clone();
                     let source = WrappedSource::new(decoder, move || {
                         *queue_index.lock().unwrap() += 1;
