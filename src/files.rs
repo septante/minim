@@ -5,7 +5,7 @@ use std::{
 };
 
 use color_eyre::{Result, eyre::eyre};
-use lofty::{prelude::*, probe::Probe};
+use lofty::{picture::Picture, prelude::*, probe::Probe};
 use rodio::{Sample, Source};
 use serde::{Deserialize, Serialize};
 
@@ -123,6 +123,17 @@ impl Track {
             .get_string(&key)
             .ok_or(eyre!("Couldn't find tag"))?
             .to_owned())
+    }
+
+    pub(crate) fn pictures(&self) -> Result<Vec<Picture>> {
+        let tagged_file = Probe::open(&self.path)?.read()?;
+
+        let tag = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())
+            .ok_or(eyre!("Couldn't find tag"))?;
+
+        Ok(tag.pictures().to_vec())
     }
 }
 

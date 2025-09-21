@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::BufReader,
+    io::{BufReader, Cursor},
     path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex},
@@ -12,6 +12,7 @@ use color_eyre::{
     eyre::{Context, eyre},
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use image::{DynamicImage, ImageBuffer, ImageDecoder, Rgb, codecs::jpeg::JpegDecoder};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
@@ -19,6 +20,7 @@ use ratatui::{
     text::Text,
     widgets::{Block, Borders, Row, Table, TableState},
 };
+use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use rodio::{OutputStream, Sink};
 use walkdir::WalkDir;
 
@@ -61,6 +63,8 @@ pub struct Player {
     theme: Theme,
     exit: bool,
     table_state: TableState,
+    picker: Picker,
+    image_state: StatefulProtocol,
 
     sink: Sink,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
@@ -83,6 +87,15 @@ impl Player {
 
         let tracks = Self::get_tracks_from_disk(&library_root);
 
+        let picker = Picker::from_query_stdio()?;
+
+        let dyn_image = if let Some(track) = tracks.first() {
+            Self::track_art_as_dynamic_image(track)
+        } else {
+            DynamicImage::default()
+        };
+        let image_state = picker.new_resize_protocol(dyn_image);
+
         let player = Player {
             args,
             library_root,
@@ -92,6 +105,8 @@ impl Player {
             theme: Theme::default(),
             exit: false,
             table_state: TableState::default().with_selected(0),
+            picker,
+            image_state,
             sink,
             _stream: stream,
         };
@@ -182,6 +197,47 @@ impl Player {
         }
     }
 
+    fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
+        let pictures = track.pictures().unwrap();
+        if let Some(picture) = pictures.first() {
+            let cursor = Cursor::new(picture.data());
+            if let Some(mimetype) = picture.mime_type() {
+                match mimetype {
+                    lofty::picture::MimeType::Png => todo!(),
+                    lofty::picture::MimeType::Jpeg => {
+                        if let Ok(decoder) = JpegDecoder::new(cursor) {
+                            let width = decoder.dimensions().0;
+                            let height = decoder.dimensions().1;
+
+                            let mut buf = vec![0; decoder.total_bytes().try_into().unwrap()];
+
+                            if decoder.read_image(&mut buf).is_ok() {
+                                let image: Option<ImageBuffer<Rgb<u8>, Vec<u8>>> =
+                                    ImageBuffer::from_raw(width, height, buf);
+                                if let Some(image) = image {
+                                    return image.into();
+                                }
+                            }
+                        }
+                    }
+                    lofty::picture::MimeType::Tiff => todo!(),
+                    lofty::picture::MimeType::Bmp => todo!(),
+                    lofty::picture::MimeType::Gif => todo!(),
+                    lofty::picture::MimeType::Unknown(_) => todo!(),
+                    _ => todo!(),
+                }
+            }
+        }
+
+        // If it fails for whatever reason, return an empty image
+        DynamicImage::default()
+    }
+
+    fn display_track_art(&mut self, track: &Track) {
+        let image = Self::track_art_as_dynamic_image(track);
+        self.image_state = self.picker.new_resize_protocol(image)
+    }
+
     fn next_table_row(&mut self) {
         let i = match self.table_state.selected() {
             Some(i) => {
@@ -194,6 +250,10 @@ impl Player {
             None => 0,
         };
         self.table_state.select(Some(i));
+
+        if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
+            self.display_track_art(&track.clone());
+        }
     }
 
     fn previous_table_row(&mut self) {
@@ -208,6 +268,10 @@ impl Player {
             None => 0,
         };
         self.table_state.select(Some(i));
+
+        if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
+            self.display_track_art(&track.clone());
+        }
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
@@ -247,6 +311,11 @@ impl Player {
     }
 
     fn render_sidebar(&mut self, frame: &mut Frame, area: Rect) {
+        let sidebar_layout =
+            &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width)]);
+
+        let shapes = sidebar_layout.split(area);
+
         let widths = [
             Constraint::Min(3),
             Constraint::Percentage(90),
@@ -264,8 +333,10 @@ impl Player {
             widths,
         );
         let block = Block::new().borders(Borders::all());
+        frame.render_widget(table.block(block), shapes[0]);
 
-        frame.render_widget(table.block(block), area);
+        let image_widget = StatefulImage::default();
+        frame.render_stateful_widget(image_widget, shapes[1], &mut self.image_state);
     }
 }
 
