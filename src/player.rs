@@ -66,7 +66,7 @@ pub struct Player {
     exit: bool,
     table_state: TableState,
     picker: Picker,
-    image_state: StatefulProtocol,
+    image_state: Arc<Mutex<StatefulProtocol>>,
 
     sink: Sink,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
@@ -103,6 +103,7 @@ impl Player {
             DynamicImage::default()
         };
         let image_state = picker.new_resize_protocol(dyn_image);
+        let image_state = Arc::new(Mutex::new(image_state));
 
         let player = Player {
             args,
@@ -300,7 +301,8 @@ impl Player {
 
     fn display_track_art(&mut self, track: &Track) {
         let image = Self::track_art_as_dynamic_image(track);
-        self.image_state = self.picker.new_resize_protocol(image)
+        let image_state = self.picker.new_resize_protocol(image);
+        self.image_state = Arc::new(Mutex::new(image_state));
     }
 
     fn next_table_row(&mut self) {
@@ -439,6 +441,7 @@ impl Player {
         frame.render_widget(table.block(block), shapes[0]);
 
         let image_widget = StatefulImage::default();
-        frame.render_stateful_widget(image_widget, shapes[1], &mut self.image_state);
+        let image_state = &mut *self.image_state.lock().unwrap();
+        frame.render_stateful_widget(image_widget, shapes[1], image_state);
     }
 }
