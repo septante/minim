@@ -15,7 +15,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
-    text::Text,
+    text::{Line, Span, Text},
     widgets::{Block, Borders, LineGauge, Row, Table, TableState},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
@@ -340,6 +340,9 @@ impl Player {
     }
 
     fn render_status_bar(&mut self, frame: &mut Frame, area: Rect) {
+        let layout = Layout::vertical([Constraint::Max(1), Constraint::Max(1)]);
+        let layout = layout.split(area);
+
         let track = self.now_playing();
         let (label, ratio) = match track {
             Some(track) => {
@@ -359,7 +362,19 @@ impl Player {
             .unfilled_style(Style::default().fg(self.theme.progress_bar_unfilled))
             .ratio(ratio)
             .label(label);
-        frame.render_widget(progress_bar, area);
+        frame.render_widget(progress_bar, layout[0]);
+
+        let instructions: Vec<Span> = vec![
+            " Play/Pause ".into(),
+            "<p>".into(),
+            " Skip ".into(),
+            "<n>".into(),
+            " Quit ".into(),
+            "<q> ".into(),
+        ];
+        let instructions = Line::from(instructions).centered();
+
+        frame.render_widget(instructions, layout[1]);
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
@@ -427,31 +442,3 @@ impl Player {
         frame.render_stateful_widget(image_widget, shapes[1], &mut self.image_state);
     }
 }
-
-// impl Widget for &Player {
-//     fn render(self, area: Rect, buf: &mut Buffer) {
-//         let title = Line::from(" Minim ".bold());
-//         let instructions = Line::from(vec![
-//             " Play/Pause ".into(),
-//             "<p>".blue().bold(),
-//             " Skip ".into(),
-//             "<n>".blue().bold(),
-//             " Quit ".into(),
-//             "<q> ".blue().bold(),
-//         ]);
-//         let block = Block::bordered()
-//             .title(title.centered())
-//             .title_bottom(instructions.centered())
-//             .border_set(border::THICK);
-
-//         let counter_text = Text::from(vec![Line::from(vec![
-//             "Library: ".into(),
-//             "ABC".to_string().yellow(),
-//         ])]);
-
-//         Paragraph::new(counter_text)
-//             .centered()
-//             .block(block)
-//             .render(area, buf);
-//     }
-// }
