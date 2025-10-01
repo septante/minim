@@ -11,14 +11,16 @@ use rodio::Source;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Field {
+/// Track metadata field types
+pub enum Field {
     Cached { field: CachedField },
     Tag { key: ItemKey },
 }
 
 #[non_exhaustive]
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum CachedField {
+/// Track metadata fields that are stored in the cached database
+pub enum CachedField {
     Title,
     Artist,
     Album,
@@ -65,7 +67,8 @@ impl TryFrom<CachedField> for ItemKey {
 
 #[non_exhaustive]
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub(crate) struct Track {
+/// A track from a file
+pub struct Track {
     pub(crate) path: PathBuf,
     title: Option<String>,
     artist: Option<String>,
@@ -139,6 +142,21 @@ impl Track {
         Ok(tag.pictures().to_vec())
     }
 
+    /// Orders two tracks based on a given list of fields
+    ///
+    /// Useful for sorting, e.g.,
+    ///
+    /// ```
+    /// # use minim::files::{CachedField, Track};
+    /// # let mut tracks = vec![];
+    /// tracks.sort_by(|a, b| {
+    ///     Track::compare_by_fields(
+    ///         a,
+    ///         b,
+    ///         vec![CachedField::Artist, CachedField::Album, CachedField::Title],
+    ///     )
+    /// });
+    /// ```
     // Adapted from https://stackoverflow.com/questions/46512227/sort-a-vector-with-a-comparator-which-changes-its-behavior-dynamically/46514082#46514082
     // TODO: Allow inverting the sort
     pub fn compare_by_fields(a: &Self, b: &Self, fields: Vec<CachedField>) -> Ordering {

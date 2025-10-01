@@ -26,6 +26,7 @@ use crate::files::{CachedField, Track, WrappedSource};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
+/// Command-line arguments for the player
 pub struct Args {
     /// Where the player should look for files
     pub dir: Option<String>,
@@ -36,6 +37,7 @@ pub struct Args {
 }
 
 #[non_exhaustive]
+/// Theme data for the player UI
 struct Theme {
     table_selected_row_bg: Color,
     table_selected_row_fg: Color,
@@ -54,6 +56,7 @@ impl Default for Theme {
     }
 }
 
+/// The player app
 pub struct Player {
     args: Args,
     library_root: PathBuf,
@@ -77,6 +80,7 @@ pub struct Player {
 }
 
 impl Player {
+    /// Create a new player instance
     pub async fn new(args: Args) -> Result<Self> {
         let stream_handle = OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
@@ -134,6 +138,7 @@ impl Player {
         files.flat_map(|f| Track::try_from(f.path())).collect()
     }
 
+    /// Start the player
     pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         let tick_rate = Duration::from_millis(100);
         let mut last_tick = Instant::now();
