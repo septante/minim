@@ -24,6 +24,8 @@ use walkdir::WalkDir;
 
 use crate::track::{CachedField, Track};
 
+const PLACEHOLDER_IMAGE_BYTES: &[u8] = include_bytes!("../placeholder.png");
+
 #[derive(Parser, Debug)]
 #[command(version, about)]
 /// Command-line arguments for the player
@@ -69,7 +71,7 @@ pub struct Player {
     exit: bool,
     table_state: TableState,
     picker: Picker,
-    image_state: Arc<Mutex<StatefulProtocol>>,
+    image_state: Arc<Mutex<Option<StatefulProtocol>>>,
     last_scroll: Instant,
     needs_image_redraw: bool,
 
@@ -104,10 +106,6 @@ impl Player {
 
         let picker = Picker::from_query_stdio()?;
 
-        let image = DynamicImage::default();
-        let image_state = picker.new_resize_protocol(image);
-        let image_state = Arc::new(Mutex::new(image_state));
-
         let player = Player {
             args,
             library_root,
@@ -118,7 +116,7 @@ impl Player {
             exit: false,
             table_state: TableState::default().with_selected(0),
             picker,
-            image_state,
+            image_state: Arc::new(Mutex::new(None)),
             last_scroll: Instant::now(),
             // Need to draw image for first track, but do it after initial render to reduce startup time
             needs_image_redraw: true,
@@ -127,6 +125,14 @@ impl Player {
         };
 
         Ok(player)
+    }
+
+    fn placeholder_image() -> DynamicImage {
+        image::ImageReader::new(Cursor::new(PLACEHOLDER_IMAGE_BYTES))
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .unwrap()
     }
 
     fn get_tracks_from_disk(path: &PathBuf) -> Vec<Track> {
@@ -168,9 +174,9 @@ impl Player {
             && let Some(track) = self.tracks.get(selection)
         {
             self.needs_image_redraw = false;
+            let image_state = self.image_state.clone();
             let track = track.clone();
             let picker = self.picker.clone();
-            let image_state = self.image_state.clone();
             tokio::spawn(async move {
                 Self::update_track_art(&track, &picker, image_state).await;
             });
@@ -314,17 +320,18 @@ impl Player {
             }
         }
 
-        // If it fails for whatever reason, return an empty image
-        DynamicImage::default()
+        // If it fails for whatever reason, use the placeholder instead
+        Self::placeholder_image()
     }
 
     async fn update_track_art(
         track: &Track,
         picker: &Picker,
-        image_state: Arc<Mutex<StatefulProtocol>>,
+        image_state: Arc<Mutex<Option<StatefulProtocol>>>,
     ) {
         let image = Self::track_art_as_dynamic_image(track).await;
         let image = picker.new_resize_protocol(image);
+        let image = Some(image);
         *image_state.lock().unwrap() = image;
     }
 
@@ -462,8 +469,15 @@ impl Player {
         frame.render_widget(table.block(block), shapes[0]);
 
         let image_widget = StatefulImage::default();
-        let image_state = &mut *self.image_state.lock().unwrap();
-        frame.render_stateful_widget(image_widget, shapes[1], image_state);
+        let mut image_state = self.image_state.lock().unwrap();
+        if image_state.is_none() {
+            let image = Self::placeholder_image();
+            let image = self.picker.new_resize_protocol(image);
+            *image_state = Some(image);
+        }
+        if let Some(ref mut image) = *image_state {
+            frame.render_stateful_widget(image_widget, shapes[1], image);
+        }
     }
 }
 
