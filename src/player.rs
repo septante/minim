@@ -19,10 +19,10 @@ use ratatui::{
     widgets::{Block, Borders, LineGauge, Row, Table, TableState},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
-use rodio::{OutputStream, OutputStreamBuilder, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
 use walkdir::WalkDir;
 
-use crate::files::{CachedField, Track, WrappedSource};
+use crate::track::{CachedField, Track};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -464,5 +464,64 @@ impl Player {
         let image_widget = StatefulImage::default();
         let image_state = &mut *self.image_state.lock().unwrap();
         frame.render_stateful_widget(image_widget, shapes[1], image_state);
+    }
+}
+
+// https://stackoverflow.com/questions/77876116/how-to-i-detect-when-a-sink-moves-to-the-next-source
+struct WrappedSource<S, F> {
+    source: S,
+    on_track_end: F,
+}
+
+impl<S, F> WrappedSource<S, F> {
+    pub(crate) fn new(source: S, on_track_end: F) -> Self {
+        Self {
+            source,
+            on_track_end,
+        }
+    }
+}
+
+impl<S, F> Iterator for WrappedSource<S, F>
+where
+    S: Source,
+    F: FnMut(),
+{
+    type Item = S::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.source.next() {
+            Some(s) => Some(s),
+            None => {
+                (self.on_track_end)();
+                None
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.source.size_hint()
+    }
+}
+
+impl<S, F> Source for WrappedSource<S, F>
+where
+    S: Source,
+    F: FnMut(),
+{
+    fn channels(&self) -> u16 {
+        self.source.channels()
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.source.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.source.total_duration()
+    }
+
+    fn current_span_len(&self) -> Option<usize> {
+        self.source.current_span_len()
     }
 }

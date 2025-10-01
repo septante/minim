@@ -7,7 +7,6 @@ use std::{
 
 use color_eyre::{Result, eyre::eyre};
 use lofty::{picture::Picture, prelude::*, probe::Probe};
-use rodio::Source;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -147,7 +146,7 @@ impl Track {
     /// Useful for sorting, e.g.,
     ///
     /// ```
-    /// # use minim::files::{CachedField, Track};
+    /// # use minim::track::{CachedField, Track};
     /// # let mut tracks = vec![];
     /// tracks.sort_by(|a, b| {
     ///     Track::compare_by_fields(
@@ -222,64 +221,5 @@ impl TryFrom<PathBuf> for Track {
                 duration: properties.duration(),
             }
         })
-    }
-}
-
-// https://stackoverflow.com/questions/77876116/how-to-i-detect-when-a-sink-moves-to-the-next-source
-pub(crate) struct WrappedSource<S, F> {
-    source: S,
-    on_track_end: F,
-}
-
-impl<S, F> WrappedSource<S, F> {
-    pub(crate) fn new(source: S, on_track_end: F) -> Self {
-        Self {
-            source,
-            on_track_end,
-        }
-    }
-}
-
-impl<S, F> Iterator for WrappedSource<S, F>
-where
-    S: Source,
-    F: FnMut(),
-{
-    type Item = S::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.source.next() {
-            Some(s) => Some(s),
-            None => {
-                (self.on_track_end)();
-                None
-            }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.source.size_hint()
-    }
-}
-
-impl<S, F> Source for WrappedSource<S, F>
-where
-    S: Source,
-    F: FnMut(),
-{
-    fn channels(&self) -> u16 {
-        self.source.channels()
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.source.sample_rate()
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        self.source.total_duration()
-    }
-
-    fn current_span_len(&self) -> Option<usize> {
-        self.source.current_span_len()
     }
 }
