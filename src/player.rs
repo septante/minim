@@ -445,7 +445,7 @@ impl Player {
 
     fn render_sidebar(&mut self, frame: &mut Frame, area: Rect) {
         let sidebar_layout =
-            &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width)]);
+            &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
 
         let shapes = sidebar_layout.split(area);
 
