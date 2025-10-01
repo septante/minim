@@ -67,6 +67,8 @@ pub struct Player {
     table_state: TableState,
     picker: Picker,
     image_state: Arc<Mutex<StatefulProtocol>>,
+    last_scroll: Instant,
+    needs_image_redraw: bool,
 
     sink: Sink,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
@@ -97,12 +99,8 @@ impl Player {
 
         let picker = Picker::from_query_stdio()?;
 
-        let dyn_image = if let Some(track) = tracks.first() {
-            Self::track_art_as_dynamic_image(track).await
-        } else {
-            DynamicImage::default()
-        };
-        let image_state = picker.new_resize_protocol(dyn_image);
+        let image = DynamicImage::default();
+        let image_state = picker.new_resize_protocol(image);
         let image_state = Arc::new(Mutex::new(image_state));
 
         let player = Player {
@@ -116,6 +114,9 @@ impl Player {
             table_state: TableState::default().with_selected(0),
             picker,
             image_state,
+            last_scroll: Instant::now(),
+            // Need to draw image for first track, but do it after initial render to reduce startup time
+            needs_image_redraw: true,
             sink,
             _stream: stream_handle,
         };
@@ -133,7 +134,7 @@ impl Player {
     }
 
     pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
-        let tick_rate = Duration::from_millis(250);
+        let tick_rate = Duration::from_millis(100);
         let mut last_tick = Instant::now();
 
         loop {
@@ -155,7 +156,18 @@ impl Player {
     }
 
     fn on_tick(&mut self) {
-        // Put any update things here
+        if self.needs_image_redraw
+            && Instant::now() - self.last_scroll > Duration::from_millis(250)
+            && let Some(track) = self.tracks.get(self.table_state.selected().unwrap())
+        {
+            self.needs_image_redraw = false;
+            let track = track.clone();
+            let picker = self.picker.clone();
+            let image_state = self.image_state.clone();
+            tokio::spawn(async move {
+                Self::update_track_art(&track, &picker, image_state).await;
+            });
+        }
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -299,10 +311,14 @@ impl Player {
         DynamicImage::default()
     }
 
-    async fn display_track_art(&mut self, track: &Track) {
+    async fn update_track_art(
+        track: &Track,
+        picker: &Picker,
+        image_state: Arc<Mutex<StatefulProtocol>>,
+    ) {
         let image = Self::track_art_as_dynamic_image(track).await;
-        let image_state = self.picker.new_resize_protocol(image);
-        *self.image_state.lock().unwrap() = image_state;
+        let image = picker.new_resize_protocol(image);
+        *image_state.lock().unwrap() = image;
     }
 
     async fn next_table_row(&mut self) {
@@ -318,9 +334,8 @@ impl Player {
         };
         self.table_state.select(Some(i));
 
-        if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
-            self.display_track_art(&track.clone()).await;
-        }
+        self.last_scroll = Instant::now();
+        self.needs_image_redraw = true;
     }
 
     async fn previous_table_row(&mut self) {
@@ -336,9 +351,8 @@ impl Player {
         };
         self.table_state.select(Some(i));
 
-        if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
-            self.display_track_art(&track.clone()).await;
-        }
+        self.last_scroll = Instant::now();
+        self.needs_image_redraw = true;
     }
 
     fn render_status_bar(&mut self, frame: &mut Frame, area: Rect) {
