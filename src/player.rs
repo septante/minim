@@ -75,7 +75,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(args: Args) -> Result<Self> {
+    pub async fn new(args: Args) -> Result<Self> {
         let stream_handle = OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
 
@@ -98,7 +98,7 @@ impl Player {
         let picker = Picker::from_query_stdio()?;
 
         let dyn_image = if let Some(track) = tracks.first() {
-            Self::track_art_as_dynamic_image(track)
+            Self::track_art_as_dynamic_image(track).await
         } else {
             DynamicImage::default()
         };
@@ -132,7 +132,7 @@ impl Player {
         files.flat_map(|f| Track::try_from(f.path())).collect()
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
+    pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         let tick_rate = Duration::from_millis(250);
         let mut last_tick = Instant::now();
 
@@ -140,7 +140,7 @@ impl Player {
             terminal.draw(|frame| self.draw(frame))?;
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
-                self.handle_events()?;
+                self.handle_events().await?;
             }
 
             if last_tick.elapsed() >= tick_rate {
@@ -172,23 +172,23 @@ impl Player {
         self.render_status_bar(frame, panel_splits[1]);
     }
 
-    fn handle_events(&mut self) -> std::io::Result<()> {
+    async fn handle_events(&mut self) -> std::io::Result<()> {
         match event::read()? {
             // it's important to check that the event is a key press event as
             // crossterm also emits key release and repeat events on Windows.
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
+                self.handle_key_event(key_event).await
             }
             _ => {}
         };
         Ok(())
     }
 
-    fn handle_key_event(&mut self, key_event: KeyEvent) {
+    async fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit = true,
-            KeyCode::Char('j') | KeyCode::Down => self.next_table_row(),
-            KeyCode::Char('k') | KeyCode::Up => self.previous_table_row(),
+            KeyCode::Char('j') | KeyCode::Down => self.next_table_row().await,
+            KeyCode::Char('k') | KeyCode::Up => self.previous_table_row().await,
             KeyCode::Char('p') => {
                 let sink = &self.sink;
                 if sink.is_paused() {
@@ -263,7 +263,7 @@ impl Player {
         self.sink.play();
     }
 
-    fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
+    async fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
         let pictures = track.pictures().unwrap();
         if let Some(picture) = pictures.first() {
             let cursor = Cursor::new(picture.data());
@@ -299,13 +299,13 @@ impl Player {
         DynamicImage::default()
     }
 
-    fn display_track_art(&mut self, track: &Track) {
-        let image = Self::track_art_as_dynamic_image(track);
+    async fn display_track_art(&mut self, track: &Track) {
+        let image = Self::track_art_as_dynamic_image(track).await;
         let image_state = self.picker.new_resize_protocol(image);
-        self.image_state = Arc::new(Mutex::new(image_state));
+        *self.image_state.lock().unwrap() = image_state;
     }
 
-    fn next_table_row(&mut self) {
+    async fn next_table_row(&mut self) {
         let i = match self.table_state.selected() {
             Some(i) => {
                 if i >= self.tracks.len() - 1 {
@@ -319,11 +319,11 @@ impl Player {
         self.table_state.select(Some(i));
 
         if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
-            self.display_track_art(&track.clone());
+            self.display_track_art(&track.clone()).await;
         }
     }
 
-    fn previous_table_row(&mut self) {
+    async fn previous_table_row(&mut self) {
         let i = match self.table_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -337,7 +337,7 @@ impl Player {
         self.table_state.select(Some(i));
 
         if let Some(track) = self.tracks.get(self.table_state.selected().unwrap()) {
-            self.display_track_art(&track.clone());
+            self.display_track_art(&track.clone()).await;
         }
     }
 

@@ -17,5 +17,6 @@ lofty = "0.22.1"
 ratatui = "0.29.0"
 ratatui-image = "8.0.1"
 rodio = { version = "0.21" }
-serde =  { version = "1.0.217", features = [ "derive" ] }
+serde = { version = "1.0.217", features = ["derive"] }
+tokio = { version = "1.47.1", features = ["full"] }
 walkdir = "2.5.0"

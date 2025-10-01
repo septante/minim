@@ -5,13 +5,14 @@ use color_eyre::{Result, eyre::Context};
 
 use minim::{Args, Player};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
     let mut terminal = ratatui::init();
     let args = Args::parse();
-    match Player::new(args) {
+    match Player::new(args).await {
         Ok(mut player) => {
-            let result = player.run(&mut terminal);
+            let result = player.run(&mut terminal).await;
             ratatui::restore();
             result.wrap_err("")
         }
