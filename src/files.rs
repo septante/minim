@@ -7,7 +7,7 @@ use std::{
 
 use color_eyre::{Result, eyre::eyre};
 use lofty::{picture::Picture, prelude::*, probe::Probe};
-use rodio::{Sample, Source};
+use rodio::Source;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Hash)]

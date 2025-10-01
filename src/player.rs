@@ -8,7 +8,7 @@ use std::{
 };
 
 use clap::Parser;
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use image::{DynamicImage, ImageBuffer, ImageDecoder, Rgb, codecs::jpeg::JpegDecoder};
 use ratatui::{
