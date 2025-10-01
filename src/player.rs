@@ -81,12 +81,13 @@ impl Player {
         let stream_handle = OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
 
-        let library_root;
-        if let Some(ref dir) = args.dir {
-            library_root = PathBuf::from_str(dir).expect("Shouldn't fail");
+        let library_root = if let Some(ref dir) = args.dir {
+            PathBuf::from_str(dir).expect("Shouldn't fail")
+        } else if let Some(dir) = dirs::audio_dir() {
+            dir
         } else {
-            library_root = dirs::audio_dir().ok_or(eyre!("Couldn't find music folder"))?;
-        }
+            std::env::current_dir()?
+        };
 
         let mut tracks = Self::get_tracks_from_disk(&library_root);
         tracks.sort_by(|a, b| {
@@ -158,7 +159,8 @@ impl Player {
     fn on_tick(&mut self) {
         if self.needs_image_redraw
             && Instant::now() - self.last_scroll > Duration::from_millis(250)
-            && let Some(track) = self.tracks.get(self.table_state.selected().unwrap())
+            && let Some(selection) = self.table_state.selected()
+            && let Some(track) = self.tracks.get(selection)
         {
             self.needs_image_redraw = false;
             let track = track.clone();
