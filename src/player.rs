@@ -401,6 +401,10 @@ impl Player {
             "<p>".into(),
             " Skip ".into(),
             "<n>".into(),
+            " Prev ".into(),
+            "<b>".into(),
+            " Queue ".into(),
+            "<Enter>".into(),
             " Quit ".into(),
             "<q> ".into(),
         ];
