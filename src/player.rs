@@ -225,15 +225,17 @@ impl Player {
             KeyCode::Char('b') => self.previous_track(),
             KeyCode::Char('n') => self.next_track(),
             KeyCode::Enter => {
-                let track = self
-                    .tracks
-                    .get(self.table_state.selected().expect("No selected row?"))
-                    .expect("Should be valid index")
-                    .clone();
+                if let Some(index) = self.table_state.selected() {
+                    let track = self
+                        .tracks
+                        .get(index)
+                        .expect("Should be valid index")
+                        .clone();
 
-                self.queue_track(&track);
+                    self.queue_track(&track);
 
-                self.queue.push(track.clone());
+                    self.queue.push(track.clone());
+                }
             }
             _ => {}
         }
