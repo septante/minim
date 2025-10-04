@@ -2,7 +2,6 @@ use std::{
     fs,
     io::Cursor,
     path::PathBuf,
-    str::FromStr,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -31,7 +30,7 @@ const PLACEHOLDER_IMAGE_BYTES: &[u8] = include_bytes!("../placeholder.png");
 /// Command-line arguments for the player
 pub struct Args {
     /// Where the player should look for files
-    pub dir: Option<String>,
+    pub dir: Option<PathBuf>,
 
     /// Reset library cache
     #[arg(short = 'c', long = "clean")]
@@ -88,7 +87,7 @@ impl Player {
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
 
         let library_root = if let Some(ref dir) = args.dir {
-            PathBuf::from_str(dir).expect("Shouldn't fail")
+            dir.to_owned()
         } else if let Some(dir) = dirs::audio_dir() {
             dir
         } else {
