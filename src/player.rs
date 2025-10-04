@@ -95,21 +95,12 @@ impl Player {
             std::env::current_dir()?
         };
 
-        let mut tracks = Self::get_tracks_from_disk(&library_root);
-        tracks.sort_by(|a, b| {
-            Track::compare_by_fields(
-                a,
-                b,
-                vec![CachedField::Artist, CachedField::Album, CachedField::Title],
-            )
-        });
-
         let picker = Picker::from_query_stdio()?;
 
-        let player = Player {
+        let mut player = Player {
             args,
             library_root,
-            tracks,
+            tracks: Vec::new(),
             queue: Vec::new(),
             queue_index: Arc::new(Mutex::new(0)),
             theme: Theme::default(),
@@ -123,6 +114,15 @@ impl Player {
             sink,
             _stream: stream_handle,
         };
+
+        player.import_tracks();
+        player.tracks.sort_by(|a, b| {
+            Track::compare_by_fields(
+                a,
+                b,
+                vec![CachedField::Artist, CachedField::Album, CachedField::Title],
+            )
+        });
 
         Ok(player)
     }
@@ -142,6 +142,24 @@ impl Player {
             .filter(|f| f.file_type().is_file());
 
         files.flat_map(|f| Track::try_from(f.path())).collect()
+    }
+
+    fn import_tracks(&mut self) {
+        let mut path = dirs::cache_dir().expect("Missing cache dir?");
+        path.push("minim");
+        path.push("library.csv");
+
+        self.tracks = if !self.args.disable_cache {
+            if let Ok(t) = crate::cache::read_cache(&path) {
+                t
+            } else {
+                Self::get_tracks_from_disk(&self.library_root)
+            }
+        } else {
+            Self::get_tracks_from_disk(&self.library_root)
+        };
+
+        crate::cache::write_cache(&path, &self.tracks).unwrap();
     }
 
     /// Start the player
@@ -380,10 +398,10 @@ impl Player {
             Some(track) => {
                 let time = self.sink.get_pos();
                 let duration = track.duration;
-                let ratio = time.as_secs() as f64 / duration.as_secs() as f64;
+                let ratio = time.as_secs() as f64 / duration as f64;
 
-                let time = Track::format_duration(&time);
-                let duration = Track::format_duration(&duration);
+                let time = Track::format_duration(time.as_secs());
+                let duration = Track::format_duration(duration);
                 (format!("{time}/{duration}"), ratio)
             }
             None => ("0:00/0:00".to_string(), 0.0),

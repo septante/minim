@@ -2,7 +2,6 @@ use std::{
     borrow::Cow,
     cmp::Ordering,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use color_eyre::{Result, eyre::eyre};
@@ -72,7 +71,7 @@ pub struct Track {
     title: Option<String>,
     artist: Option<String>,
     album: Option<String>,
-    pub duration: Duration,
+    pub duration: u64,
 }
 
 impl Track {
@@ -80,8 +79,7 @@ impl Track {
         tag.as_deref().map(|x| x.to_owned())
     }
 
-    pub(crate) fn format_duration(duration: &Duration) -> String {
-        let secs = duration.as_secs();
+    pub(crate) fn format_duration(secs: u64) -> String {
         let mins = secs / 60;
         let secs = secs % 60;
         format!("{mins}:{:0>2}", secs)
@@ -101,7 +99,7 @@ impl Track {
                 }
             }
             CachedField::Artist => self.artist.clone().unwrap_or_default(),
-            CachedField::Duration => Self::format_duration(&self.duration),
+            CachedField::Duration => Self::format_duration(self.duration),
             _ => {
                 if let Ok(key) = field.try_into() {
                     if let Ok(s) = self.tag_string_from_track(key) {
@@ -218,7 +216,7 @@ impl TryFrom<PathBuf> for Track {
                 title: Self::tag_to_string(tag.title()),
                 artist: Self::tag_to_string(tag.artist()),
                 album: Self::tag_to_string(tag.album()),
-                duration: properties.duration(),
+                duration: properties.duration().as_secs(),
             }
         })
     }

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod cache;
 mod player;
 /// Types related to tracks
 pub mod track;
