@@ -120,11 +120,11 @@ impl Track {
         let tag = tagged_file
             .primary_tag()
             .or_else(|| tagged_file.first_tag())
-            .ok_or(eyre!("Couldn't"))?;
+            .ok_or(eyre!("Couldn't find tag"))?;
 
         Ok(tag
             .get_string(&key)
-            .ok_or(eyre!("Couldn't find tag"))?
+            .ok_or(eyre!("Couldn't get string for {key:?}"))?
             .to_owned())
     }
 

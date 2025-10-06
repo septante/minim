@@ -30,7 +30,7 @@ const PLACEHOLDER_IMAGE_BYTES: &[u8] = include_bytes!("../placeholder.png");
 /// Command-line arguments for the player
 pub struct Args {
     /// Where the player should look for files
-    pub dir: Option<PathBuf>,
+    dir: Option<PathBuf>,
 
     /// Reset library cache
     #[arg(short = 'c', long = "clean")]
@@ -511,7 +511,7 @@ struct WrappedSource<S, F> {
 }
 
 impl<S, F> WrappedSource<S, F> {
-    pub(crate) fn new(source: S, on_track_end: F) -> Self {
+    fn new(source: S, on_track_end: F) -> Self {
         Self {
             source,
             on_track_end,
