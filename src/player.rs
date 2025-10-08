@@ -34,7 +34,7 @@ pub struct Args {
 
     /// Reset library cache
     #[arg(short = 'c', long = "clean")]
-    disable_cache: bool,
+    reset_cache: bool,
 }
 
 #[non_exhaustive]
@@ -148,12 +148,10 @@ impl Player {
         path.push("minim");
         path.push("library.csv");
 
-        self.tracks = if !self.args.disable_cache {
-            if let Ok(t) = crate::cache::read_cache(&path) {
-                t
-            } else {
-                Self::get_tracks_from_disk(&self.library_root)
-            }
+        self.tracks = if !self.args.reset_cache
+            && let Ok(tracks) = crate::cache::read_cache(&path)
+        {
+            tracks
         } else {
             Self::get_tracks_from_disk(&self.library_root)
         };
