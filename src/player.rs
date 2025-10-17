@@ -146,6 +146,11 @@ impl Player {
     fn import_tracks(&mut self) {
         let mut path = dirs::cache_dir().expect("Missing cache dir?");
         path.push("minim");
+        if let Ok(exists) = fs::exists(&path)
+            && !exists
+        {
+            fs::create_dir(&path).unwrap();
+        }
         path.push("library.csv");
 
         self.tracks = if !self.args.reset_cache
