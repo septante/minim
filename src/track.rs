@@ -159,15 +159,26 @@ impl Track {
     pub fn compare_by_fields(a: &Self, b: &Self, fields: Vec<CachedField>) -> Ordering {
         fields.iter().fold(Ordering::Equal, |prev, &field| {
             prev.then_with(|| match field {
-                CachedField::Title => a.title.cmp(&b.title),
-                CachedField::Artist => a.artist.cmp(&b.artist),
-                CachedField::Album => a.album.cmp(&b.album),
+                CachedField::Title => {
+                    Self::case_insensitive_cmp(a.title.as_ref(), b.title.as_ref())
+                }
+                CachedField::Artist => {
+                    Self::case_insensitive_cmp(a.artist.as_ref(), b.artist.as_ref())
+                }
+                CachedField::Album => {
+                    Self::case_insensitive_cmp(a.album.as_ref(), b.album.as_ref())
+                }
                 // CachedField::Year => todo!(),
                 // CachedField::Genre => todo!(),
                 CachedField::Duration => a.duration.cmp(&b.duration),
                 _ => Ordering::Equal,
             })
         })
+    }
+
+    fn case_insensitive_cmp(a: Option<&String>, b: Option<&String>) -> Ordering {
+        a.map(|s| s.to_lowercase())
+            .cmp(&b.map(|s| s.to_lowercase()))
     }
 }
 
