@@ -159,15 +159,9 @@ impl Track {
     pub fn compare_by_fields(a: &Self, b: &Self, fields: Vec<CachedField>) -> Ordering {
         fields.iter().fold(Ordering::Equal, |prev, &field| {
             prev.then_with(|| match field {
-                CachedField::Title => {
-                    Self::case_insensitive_cmp(a.title.as_ref(), b.title.as_ref())
-                }
-                CachedField::Artist => {
-                    Self::case_insensitive_cmp(a.artist.as_ref(), b.artist.as_ref())
-                }
-                CachedField::Album => {
-                    Self::case_insensitive_cmp(a.album.as_ref(), b.album.as_ref())
-                }
+                CachedField::Title => Self::case_insensitive_cmp(&a.title, &b.title),
+                CachedField::Artist => Self::case_insensitive_cmp(&a.artist, &b.artist),
+                CachedField::Album => Self::case_insensitive_cmp(&a.album, &b.album),
                 // CachedField::Year => todo!(),
                 // CachedField::Genre => todo!(),
                 CachedField::Duration => a.duration.cmp(&b.duration),
@@ -176,9 +170,15 @@ impl Track {
         })
     }
 
-    fn case_insensitive_cmp(a: Option<&String>, b: Option<&String>) -> Ordering {
-        a.map(|s| s.to_lowercase())
-            .cmp(&b.map(|s| s.to_lowercase()))
+    fn case_insensitive_cmp(a: &Option<String>, b: &Option<String>) -> Ordering {
+        Self::option_map_cmp(a.as_ref(), b.as_ref(), |s| s.to_lowercase())
+    }
+
+    fn option_map_cmp<T, U>(a: Option<&T>, b: Option<&T>, f: fn(&T) -> U) -> Ordering
+    where
+        U: Ord,
+    {
+        a.map(f).cmp(&b.map(f))
     }
 }
 
