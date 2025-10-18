@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::Cursor,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -138,7 +138,7 @@ impl Player {
             .unwrap()
     }
 
-    fn get_tracks_from_disk(path: &PathBuf) -> Vec<Track> {
+    fn get_tracks_from_disk(path: &Path) -> Vec<Track> {
         let files = WalkDir::new(path)
             .into_iter()
             .filter_map(|e| e.ok())
