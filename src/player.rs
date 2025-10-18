@@ -64,6 +64,7 @@ pub struct Player {
     tracks: Vec<Track>,
     queue: Vec<Track>,
     queue_index: Arc<Mutex<usize>>,
+    volume_percentage: usize,
 
     // UI related state
     theme: Theme,
@@ -85,6 +86,8 @@ impl Player {
     pub async fn new(args: Args) -> Result<Self> {
         let stream_handle = OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
+        let volume_percentage = 50;
+        sink.set_volume(volume_percentage as f32 / 100.0);
 
         let library_root = if let Some(ref dir) = args.dir {
             dir.to_owned()
@@ -102,6 +105,7 @@ impl Player {
             tracks: Vec::new(),
             queue: Vec::new(),
             queue_index: Arc::new(Mutex::new(0)),
+            volume_percentage,
             theme: Theme::default(),
             exit: false,
             table_state: TableState::default().with_selected(0),
@@ -370,8 +374,17 @@ impl Player {
     }
 
     fn render_status_bar(&mut self, frame: &mut Frame, area: Rect) {
-        let layout = Layout::vertical([Constraint::Max(1), Constraint::Max(1)]);
-        let layout = layout.split(area);
+        let layout = Layout::vertical([Constraint::Max(1), Constraint::Max(1), Constraint::Max(1)]);
+        let bars = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Percentage(80),
+            Constraint::Min(1),
+            Constraint::Percentage(20),
+            Constraint::Min(1),
+        ]);
+
+        let status_bar_layout = layout.split(area);
+        let gauge_layout = bars.split(status_bar_layout[1]);
 
         let track = self.now_playing();
         let (label, ratio) = match track {
@@ -387,12 +400,25 @@ impl Player {
             None => ("0:00/0:00".to_string(), 0.0),
         };
 
+        let spacer = Line::raw(" ");
+
         let progress_bar = LineGauge::default()
             .filled_style(Style::default().fg(self.theme.progress_bar_filled))
             .unfilled_style(Style::default().fg(self.theme.progress_bar_unfilled))
             .ratio(ratio)
             .label(label);
-        frame.render_widget(progress_bar, layout[0]);
+
+        let volume_gauge = LineGauge::default()
+            .filled_style(Style::default().fg(self.theme.progress_bar_filled))
+            .unfilled_style(Style::default().fg(self.theme.progress_bar_unfilled))
+            .ratio(self.volume_percentage as f64 / 100.0)
+            .label(format!("{}%", self.volume_percentage));
+
+        frame.render_widget(&spacer, gauge_layout[0]);
+        frame.render_widget(&progress_bar, gauge_layout[1]);
+        frame.render_widget(&spacer, gauge_layout[2]);
+        frame.render_widget(&volume_gauge, gauge_layout[3]);
+        frame.render_widget(&spacer, gauge_layout[4]);
 
         let instructions: Vec<Span> = vec![
             " Play/Pause ".into(),
@@ -408,7 +434,7 @@ impl Player {
         ];
         let instructions = Line::from(instructions).centered();
 
-        frame.render_widget(instructions, layout[1]);
+        frame.render_widget(instructions, status_bar_layout[2]);
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
