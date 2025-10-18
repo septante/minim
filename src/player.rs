@@ -9,7 +9,7 @@ use std::{
 use clap::Parser;
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use image::{DynamicImage, ImageBuffer, ImageDecoder, Rgb, codecs::jpeg::JpegDecoder};
+use image::{DynamicImage, ImageReader};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
@@ -312,34 +312,12 @@ impl Player {
 
     async fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
         let pictures = track.pictures().unwrap();
-        if let Some(picture) = pictures.first() {
-            let cursor = Cursor::new(picture.data());
-            if let Some(mimetype) = picture.mime_type() {
-                match mimetype {
-                    lofty::picture::MimeType::Png => todo!(),
-                    lofty::picture::MimeType::Jpeg => {
-                        if let Ok(decoder) = JpegDecoder::new(cursor) {
-                            let width = decoder.dimensions().0;
-                            let height = decoder.dimensions().1;
-
-                            let mut buf = vec![0; decoder.total_bytes().try_into().unwrap()];
-
-                            if decoder.read_image(&mut buf).is_ok() {
-                                let image: Option<ImageBuffer<Rgb<u8>, Vec<u8>>> =
-                                    ImageBuffer::from_raw(width, height, buf);
-                                if let Some(image) = image {
-                                    return image.into();
-                                }
-                            }
-                        }
-                    }
-                    lofty::picture::MimeType::Tiff => todo!(),
-                    lofty::picture::MimeType::Bmp => todo!(),
-                    lofty::picture::MimeType::Gif => todo!(),
-                    lofty::picture::MimeType::Unknown(_) => todo!(),
-                    _ => todo!(),
-                }
-            }
+        if let Some(picture) = pictures.first()
+            && let cursor = Cursor::new(picture.data())
+            && let Ok(decoder) = ImageReader::new(cursor).with_guessed_format()
+            && let Ok(image) = decoder.decode()
+        {
+            return image;
         }
 
         // If it fails for whatever reason, use the placeholder instead
