@@ -244,6 +244,12 @@ impl Player {
             (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
                 self.previous_table_row().await;
             }
+            (_, KeyCode::Home) => {
+                self.select_row(0);
+            }
+            (_, KeyCode::End) => {
+                self.select_row(self.tracks.len() - 1);
+            }
 
             // Volume controls
             (_, KeyCode::Media(MediaKeyCode::LowerVolume))
@@ -375,8 +381,15 @@ impl Player {
         *image_state.lock().unwrap() = image;
     }
 
+    fn select_row(&mut self, row: usize) {
+        self.table_state.select(Some(row));
+
+        self.last_scroll = Instant::now();
+        self.needs_image_redraw = true;
+    }
+
     async fn next_table_row(&mut self) {
-        let i = match self.table_state.selected() {
+        let row = match self.table_state.selected() {
             Some(i) => {
                 if i >= self.tracks.len() - 1 {
                     0
@@ -386,14 +399,12 @@ impl Player {
             }
             None => 0,
         };
-        self.table_state.select(Some(i));
 
-        self.last_scroll = Instant::now();
-        self.needs_image_redraw = true;
+        self.select_row(row);
     }
 
     async fn previous_table_row(&mut self) {
-        let i = match self.table_state.selected() {
+        let row = match self.table_state.selected() {
             Some(i) => {
                 if i == 0 {
                     self.tracks.len() - 1
@@ -403,10 +414,8 @@ impl Player {
             }
             None => 0,
         };
-        self.table_state.select(Some(i));
 
-        self.last_scroll = Instant::now();
-        self.needs_image_redraw = true;
+        self.select_row(row);
     }
 
     fn render_status_bar(&mut self, frame: &mut Frame, area: Rect) {
