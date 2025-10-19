@@ -142,7 +142,7 @@ impl Track {
     }
 
     pub(crate) async fn track_art_as_dynamic_image(&self) -> Result<DynamicImage> {
-        let pictures = self.pictures().unwrap();
+        let pictures = self.pictures()?;
         let picture = pictures.first().ok_or(eyre!("No pictures found!"))?;
         let cursor = Cursor::new(picture.data());
         let decoder = ImageReader::new(cursor).with_guessed_format()?;
