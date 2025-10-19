@@ -62,6 +62,7 @@ struct Model {
     queue: Vec<Track>,
     queue_index: Arc<Mutex<usize>>,
     volume_percentage: usize,
+    exit: bool,
 
     // UI related state
     theme: Theme,
@@ -70,6 +71,8 @@ struct Model {
     last_scroll: Instant,
     needs_image_redraw: bool,
 
+    // Resources
+    picker: Picker,
     sink: Sink,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
     // See https://github.com/RustAudio/rodio/issues/525
@@ -77,6 +80,78 @@ struct Model {
 }
 
 impl Model {
+    async fn handle_events(&mut self) -> std::io::Result<()> {
+        match event::read()? {
+            // it's important to check that the event is a key press event as
+            // crossterm also emits key release and repeat events on Windows.
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event).await
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    async fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match (key_event.modifiers, key_event.code) {
+            (KeyModifiers::NONE, KeyCode::Char('q')) => self.exit = true,
+
+            // Navigation
+            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+                self.next_table_row().await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+                self.previous_table_row().await;
+            }
+            (_, KeyCode::Home) => {
+                self.select_row(0);
+            }
+            (_, KeyCode::End) => {
+                self.select_row(self.tracks.len() - 1);
+            }
+
+            // Volume controls
+            (_, KeyCode::Media(MediaKeyCode::LowerVolume))
+            | (KeyModifiers::CONTROL, KeyCode::Char('j'))
+            | (KeyModifiers::CONTROL, KeyCode::Down) => {
+                self.decrement_volume(5);
+            }
+            (_, KeyCode::Media(MediaKeyCode::RaiseVolume))
+            | (KeyModifiers::CONTROL, KeyCode::Char('k'))
+            | (KeyModifiers::CONTROL, KeyCode::Up) => {
+                self.increment_volume(5);
+            }
+
+            // Playback controls
+            (_, KeyCode::Media(MediaKeyCode::PlayPause))
+            | (KeyModifiers::NONE, KeyCode::Char('p')) => {
+                let sink = &self.sink;
+                if sink.is_paused() {
+                    sink.play();
+                } else {
+                    sink.pause();
+                }
+            }
+            (_, KeyCode::Media(MediaKeyCode::TrackPrevious))
+            | (KeyModifiers::NONE, KeyCode::Char('b')) => self.previous_track(),
+            (_, KeyCode::Media(MediaKeyCode::TrackNext))
+            | (KeyModifiers::NONE, KeyCode::Char('n')) => self.next_track(),
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                if let Some(index) = self.table_state.selected() {
+                    let track = self
+                        .tracks
+                        .get(index)
+                        .expect("Should be valid index")
+                        .clone();
+
+                    self.queue_track(&track);
+                    self.queue.push(track.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn increment_volume(&mut self, percentage: usize) {
         self.volume_percentage += percentage;
         if self.volume_percentage > 100 {
@@ -182,8 +257,6 @@ pub struct Player {
     args: Args,
     library_root: PathBuf,
     model: Model,
-    exit: bool,
-    picker: Picker,
 }
 
 impl Player {
@@ -209,6 +282,8 @@ impl Player {
             queue: Vec::new(),
             queue_index: Arc::new(Mutex::new(0)),
             volume_percentage,
+            exit: false,
+
             theme: Theme::default(),
             table_state: TableState::default().with_selected(0),
             image_state: Arc::new(Mutex::new(None)),
@@ -216,6 +291,7 @@ impl Player {
             // Need to draw image for first track, but do it after initial render to reduce startup time
             needs_image_redraw: true,
 
+            picker,
             sink,
             _stream: stream_handle,
         };
@@ -224,8 +300,6 @@ impl Player {
             args,
             library_root,
             model,
-            exit: false,
-            picker,
         };
 
         player.import_tracks();
@@ -287,7 +361,7 @@ impl Player {
             terminal.draw(|frame| self.draw(frame))?;
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
-                self.handle_events().await?;
+                self.model.handle_events().await?;
             }
 
             if last_tick.elapsed() >= tick_rate {
@@ -295,7 +369,7 @@ impl Player {
                 last_tick = Instant::now();
             }
 
-            if self.exit {
+            if self.model.exit {
                 return Ok(());
             }
         }
@@ -310,7 +384,7 @@ impl Player {
             self.model.needs_image_redraw = false;
             let image_state = self.model.image_state.clone();
             let track = track.clone();
-            let picker = self.picker.clone();
+            let picker = self.model.picker.clone();
             tokio::spawn(async move {
                 Self::update_track_art(&track, &picker, image_state).await;
             });
@@ -326,82 +400,9 @@ impl Player {
         let panel_splits = main_panel_layout.split(frame.area());
         let primary_tab = primary_tab_layout.split(panel_splits[0]);
 
-        self.render_table(frame, primary_tab[0]);
-        self.render_sidebar(frame, primary_tab[1]);
-        self.render_status_bar(frame, panel_splits[1]);
-    }
-
-    async fn handle_events(&mut self) -> std::io::Result<()> {
-        match event::read()? {
-            // it's important to check that the event is a key press event as
-            // crossterm also emits key release and repeat events on Windows.
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event).await
-            }
-            _ => {}
-        };
-        Ok(())
-    }
-
-    async fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match (key_event.modifiers, key_event.code) {
-            (KeyModifiers::NONE, KeyCode::Char('q')) => self.exit = true,
-
-            // Navigation
-            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-                self.model.next_table_row().await;
-            }
-            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-                self.model.previous_table_row().await;
-            }
-            (_, KeyCode::Home) => {
-                self.model.select_row(0);
-            }
-            (_, KeyCode::End) => {
-                self.model.select_row(self.model.tracks.len() - 1);
-            }
-
-            // Volume controls
-            (_, KeyCode::Media(MediaKeyCode::LowerVolume))
-            | (KeyModifiers::CONTROL, KeyCode::Char('j'))
-            | (KeyModifiers::CONTROL, KeyCode::Down) => {
-                self.model.decrement_volume(5);
-            }
-            (_, KeyCode::Media(MediaKeyCode::RaiseVolume))
-            | (KeyModifiers::CONTROL, KeyCode::Char('k'))
-            | (KeyModifiers::CONTROL, KeyCode::Up) => {
-                self.model.increment_volume(5);
-            }
-
-            // Playback controls
-            (_, KeyCode::Media(MediaKeyCode::PlayPause))
-            | (KeyModifiers::NONE, KeyCode::Char('p')) => {
-                let sink = &self.model.sink;
-                if sink.is_paused() {
-                    sink.play();
-                } else {
-                    sink.pause();
-                }
-            }
-            (_, KeyCode::Media(MediaKeyCode::TrackPrevious))
-            | (KeyModifiers::NONE, KeyCode::Char('b')) => self.model.previous_track(),
-            (_, KeyCode::Media(MediaKeyCode::TrackNext))
-            | (KeyModifiers::NONE, KeyCode::Char('n')) => self.model.next_track(),
-            (KeyModifiers::NONE, KeyCode::Enter) => {
-                if let Some(index) = self.model.table_state.selected() {
-                    let track = self
-                        .model
-                        .tracks
-                        .get(index)
-                        .expect("Should be valid index")
-                        .clone();
-
-                    self.model.queue_track(&track);
-                    self.model.queue.push(track.clone());
-                }
-            }
-            _ => {}
-        }
+        Self::render_table(&mut self.model, frame, primary_tab[0]);
+        Self::render_sidebar(&mut self.model, frame, primary_tab[1]);
+        Self::render_status_bar(&self.model, frame, panel_splits[1]);
     }
 
     async fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
@@ -429,7 +430,7 @@ impl Player {
         *image_state.lock().unwrap() = image;
     }
 
-    fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
+    fn render_status_bar(model: &Model, frame: &mut Frame, area: Rect) {
         let layout = Layout::vertical([Constraint::Max(1), Constraint::Max(1), Constraint::Max(1)]);
         let bars = Layout::horizontal([
             Constraint::Min(1),
@@ -442,10 +443,10 @@ impl Player {
         let status_bar_layout = layout.split(area);
         let gauge_layout = bars.split(status_bar_layout[1]);
 
-        let track = self.model.now_playing();
+        let track = model.now_playing();
         let (label, ratio) = match track {
             Some(track) => {
-                let time = self.model.sink.get_pos();
+                let time = model.sink.get_pos();
                 let duration = track.duration;
                 let ratio = time.as_secs() as f64 / duration as f64;
 
@@ -459,16 +460,16 @@ impl Player {
         let spacer = Line::raw(" ");
 
         let progress_bar = LineGauge::default()
-            .filled_style(Style::default().fg(self.model.theme.progress_bar_filled))
-            .unfilled_style(Style::default().fg(self.model.theme.progress_bar_unfilled))
+            .filled_style(Style::default().fg(model.theme.progress_bar_filled))
+            .unfilled_style(Style::default().fg(model.theme.progress_bar_unfilled))
             .ratio(ratio)
             .label(label);
 
         let volume_gauge = LineGauge::default()
-            .filled_style(Style::default().fg(self.model.theme.progress_bar_filled))
-            .unfilled_style(Style::default().fg(self.model.theme.progress_bar_unfilled))
-            .ratio(self.model.volume_percentage as f64 / 100.0)
-            .label(format!("{}%", self.model.volume_percentage));
+            .filled_style(Style::default().fg(model.theme.progress_bar_filled))
+            .unfilled_style(Style::default().fg(model.theme.progress_bar_unfilled))
+            .ratio(model.volume_percentage as f64 / 100.0)
+            .label(format!("{}%", model.volume_percentage));
 
         frame.render_widget(&spacer, gauge_layout[0]);
         frame.render_widget(&progress_bar, gauge_layout[1]);
@@ -493,10 +494,10 @@ impl Player {
         frame.render_widget(instructions, status_bar_layout[2]);
     }
 
-    fn render_table(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_table(model: &mut Model, frame: &mut Frame, area: Rect) {
         let selected_row_style = Style::default()
-            .bg(self.model.theme.table_selected_row_bg)
-            .fg(self.model.theme.table_selected_row_fg);
+            .bg(model.theme.table_selected_row_bg)
+            .fg(model.theme.table_selected_row_fg);
 
         let header = ["Title", "Artist", "Duration"]
             .into_iter()
@@ -504,7 +505,7 @@ impl Player {
             .collect::<Row>()
             .bottom_margin(1);
 
-        let rows = self.model.tracks.iter().map(|track| {
+        let rows = model.tracks.iter().map(|track| {
             Row::new(vec![
                 Text::from(track.cached_field_string(CachedField::Title)),
                 Text::from(track.cached_field_string(CachedField::Artist)),
@@ -526,10 +527,10 @@ impl Player {
             .header(header)
             .row_highlight_style(selected_row_style);
 
-        frame.render_stateful_widget(table, area, &mut self.model.table_state);
+        frame.render_stateful_widget(table, area, &mut model.table_state);
     }
 
-    fn render_sidebar(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_sidebar(model: &mut Model, frame: &mut Frame, area: Rect) {
         let sidebar_layout =
             &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
 
@@ -541,7 +542,7 @@ impl Player {
             Constraint::Min(6),
         ];
         let table = Table::new(
-            self.model.queue.iter().enumerate().map(|(index, track)| {
+            model.queue.iter().enumerate().map(|(index, track)| {
                 let index = index + 1;
                 Row::new(vec![
                     Text::from(format!("{index}")),
@@ -555,10 +556,10 @@ impl Player {
         frame.render_widget(table.block(block), shapes[0]);
 
         let image_widget = StatefulImage::default();
-        let mut image_state = self.model.image_state.lock().unwrap();
+        let mut image_state = model.image_state.lock().unwrap();
         if image_state.is_none() {
             let image = Self::placeholder_image();
-            let image = self.picker.new_resize_protocol(image);
+            let image = model.picker.new_resize_protocol(image);
             *image_state = Some(image);
         }
         if let Some(ref mut image) = *image_state {
