@@ -1,10 +1,12 @@
 use std::{
     borrow::Cow,
     cmp::Ordering,
+    io::Cursor,
     path::{Path, PathBuf},
 };
 
 use color_eyre::{Result, eyre::eyre};
+use image::{DynamicImage, ImageReader};
 use lofty::{picture::Picture, prelude::*, probe::Probe};
 use serde::{Deserialize, Serialize};
 
@@ -128,7 +130,7 @@ impl Track {
             .to_owned())
     }
 
-    pub(crate) fn pictures(&self) -> Result<Vec<Picture>> {
+    fn pictures(&self) -> Result<Vec<Picture>> {
         let tagged_file = Probe::open(&self.path)?.read()?;
 
         let tag = tagged_file
@@ -137,6 +139,15 @@ impl Track {
             .ok_or(eyre!("Couldn't find tag"))?;
 
         Ok(tag.pictures().to_vec())
+    }
+
+    pub(crate) async fn track_art_as_dynamic_image(&self) -> Result<DynamicImage> {
+        let pictures = self.pictures().unwrap();
+        let picture = pictures.first().ok_or(eyre!("No pictures found!"))?;
+        let cursor = Cursor::new(picture.data());
+        let decoder = ImageReader::new(cursor).with_guessed_format()?;
+        let image = decoder.decode()?;
+        Ok(image)
     }
 
     /// Orders two tracks based on a given list of fields

@@ -9,7 +9,7 @@ use std::{
 use clap::Parser;
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode};
-use image::{DynamicImage, ImageReader};
+use image::DynamicImage;
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
@@ -314,14 +314,6 @@ impl Player {
         Ok(player)
     }
 
-    fn placeholder_image() -> DynamicImage {
-        image::ImageReader::new(Cursor::new(PLACEHOLDER_IMAGE_BYTES))
-            .with_guessed_format()
-            .unwrap()
-            .decode()
-            .unwrap()
-    }
-
     fn get_tracks_from_disk(path: &Path) -> Vec<Track> {
         let files = WalkDir::new(path)
             .into_iter()
@@ -391,6 +383,29 @@ impl Player {
         }
     }
 
+    fn placeholder_image() -> DynamicImage {
+        image::ImageReader::new(Cursor::new(PLACEHOLDER_IMAGE_BYTES))
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .unwrap()
+    }
+
+    async fn update_track_art(
+        track: &Track,
+        picker: &Picker,
+        image_state: Arc<Mutex<Option<StatefulProtocol>>>,
+    ) {
+        let image = match track.track_art_as_dynamic_image().await {
+            Ok(image) => image,
+            Err(_) => Self::placeholder_image(),
+        };
+
+        let image = picker.new_resize_protocol(image);
+        let image = Some(image);
+        *image_state.lock().unwrap() = image;
+    }
+
     fn draw(&mut self, frame: &mut Frame) {
         let primary_tab_layout =
             &Layout::horizontal([Constraint::Percentage(80), Constraint::Min(15)]);
@@ -403,31 +418,6 @@ impl Player {
         Self::render_table(&mut self.model, frame, primary_tab[0]);
         Self::render_sidebar(&mut self.model, frame, primary_tab[1]);
         Self::render_status_bar(&self.model, frame, panel_splits[1]);
-    }
-
-    async fn track_art_as_dynamic_image(track: &Track) -> DynamicImage {
-        let pictures = track.pictures().unwrap();
-        if let Some(picture) = pictures.first()
-            && let cursor = Cursor::new(picture.data())
-            && let Ok(decoder) = ImageReader::new(cursor).with_guessed_format()
-            && let Ok(image) = decoder.decode()
-        {
-            return image;
-        }
-
-        // If it fails for whatever reason, use the placeholder instead
-        Self::placeholder_image()
-    }
-
-    async fn update_track_art(
-        track: &Track,
-        picker: &Picker,
-        image_state: Arc<Mutex<Option<StatefulProtocol>>>,
-    ) {
-        let image = Self::track_art_as_dynamic_image(track).await;
-        let image = picker.new_resize_protocol(image);
-        let image = Some(image);
-        *image_state.lock().unwrap() = image;
     }
 
     fn render_status_bar(model: &Model, frame: &mut Frame, area: Rect) {
