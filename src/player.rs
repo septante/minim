@@ -8,7 +8,7 @@ use std::{
 
 use clap::Parser;
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use image::{DynamicImage, ImageReader};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -234,11 +234,22 @@ impl Player {
     }
 
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Char('q') => self.exit = true,
-            KeyCode::Char('j') | KeyCode::Down => self.next_table_row().await,
-            KeyCode::Char('k') | KeyCode::Up => self.previous_table_row().await,
-            KeyCode::Char('p') => {
+        match (key_event.modifiers, key_event.code) {
+            (KeyModifiers::NONE, KeyCode::Char('q')) => self.exit = true,
+            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+                self.next_table_row().await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+                self.previous_table_row().await;
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('j'))
+            | (KeyModifiers::CONTROL, KeyCode::Down) => {
+                self.decrement_volume(5);
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('k')) | (KeyModifiers::CONTROL, KeyCode::Up) => {
+                self.increment_volume(5);
+            }
+            (KeyModifiers::NONE, KeyCode::Char('p')) => {
                 let sink = &self.sink;
                 if sink.is_paused() {
                     sink.play();
@@ -246,9 +257,9 @@ impl Player {
                     sink.pause();
                 }
             }
-            KeyCode::Char('b') => self.previous_track(),
-            KeyCode::Char('n') => self.next_track(),
-            KeyCode::Enter => {
+            (KeyModifiers::NONE, KeyCode::Char('b')) => self.previous_track(),
+            (KeyModifiers::NONE, KeyCode::Char('n')) => self.next_track(),
+            (KeyModifiers::NONE, KeyCode::Enter) => {
                 if let Some(index) = self.table_state.selected() {
                     let track = self
                         .tracks
@@ -263,6 +274,19 @@ impl Player {
             }
             _ => {}
         }
+    }
+
+    fn increment_volume(&mut self, percentage: usize) {
+        self.volume_percentage += percentage;
+        if self.volume_percentage > 100 {
+            self.volume_percentage = 100;
+        }
+        self.sink.set_volume(self.volume_percentage as f32 / 100.0);
+    }
+
+    fn decrement_volume(&mut self, percentage: usize) {
+        self.volume_percentage = self.volume_percentage.saturating_sub(percentage);
+        self.sink.set_volume(self.volume_percentage as f32 / 100.0);
     }
 
     fn now_playing(&self) -> Option<&Track> {
