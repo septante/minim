@@ -8,7 +8,7 @@ use std::{
 
 use clap::Parser;
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode};
 use image::{DynamicImage, ImageReader};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -236,20 +236,30 @@ impl Player {
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
         match (key_event.modifiers, key_event.code) {
             (KeyModifiers::NONE, KeyCode::Char('q')) => self.exit = true,
+
+            // Navigation
             (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
                 self.next_table_row().await;
             }
             (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
                 self.previous_table_row().await;
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('j'))
+
+            // Volume controls
+            (_, KeyCode::Media(MediaKeyCode::LowerVolume))
+            | (KeyModifiers::CONTROL, KeyCode::Char('j'))
             | (KeyModifiers::CONTROL, KeyCode::Down) => {
                 self.decrement_volume(5);
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('k')) | (KeyModifiers::CONTROL, KeyCode::Up) => {
+            (_, KeyCode::Media(MediaKeyCode::RaiseVolume))
+            | (KeyModifiers::CONTROL, KeyCode::Char('k'))
+            | (KeyModifiers::CONTROL, KeyCode::Up) => {
                 self.increment_volume(5);
             }
-            (KeyModifiers::NONE, KeyCode::Char('p')) => {
+
+            // Playback controls
+            (_, KeyCode::Media(MediaKeyCode::PlayPause))
+            | (KeyModifiers::NONE, KeyCode::Char('p')) => {
                 let sink = &self.sink;
                 if sink.is_paused() {
                     sink.play();
@@ -257,8 +267,10 @@ impl Player {
                     sink.pause();
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Char('b')) => self.previous_track(),
-            (KeyModifiers::NONE, KeyCode::Char('n')) => self.next_track(),
+            (_, KeyCode::Media(MediaKeyCode::TrackPrevious))
+            | (KeyModifiers::NONE, KeyCode::Char('b')) => self.previous_track(),
+            (_, KeyCode::Media(MediaKeyCode::TrackNext))
+            | (KeyModifiers::NONE, KeyCode::Char('n')) => self.next_track(),
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 if let Some(index) = self.table_state.selected() {
                     let track = self
