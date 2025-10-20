@@ -12,10 +12,10 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use image::DynamicImage;
 use ratatui::{
     DefaultTerminal, Frame,
-    layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
+    layout::{Constraint, Layout, Margin, Rect},
+    style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, LineGauge, Row, Table, TableState},
+    widgets::{Block, BorderType, Borders, Clear, LineGauge, Paragraph, Row, Table, TableState},
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
@@ -60,6 +60,7 @@ impl Default for Theme {
 #[derive(Debug, Clone)]
 enum Message {
     Quit,
+    ToggleHelp,
     PlayPause,
     NextTrack,
     PrevTrack,
@@ -77,6 +78,7 @@ enum RunningState {
 
 struct Model {
     running_state: RunningState,
+    show_help: bool,
     tracks: Vec<Track>,
     queue: Vec<Track>,
     queue_index: Arc<Mutex<usize>>,
@@ -101,19 +103,14 @@ impl Model {
     async fn update(&mut self, message: Message) {
         match message {
             Message::Quit => self.running_state = RunningState::Quit,
-
-            // Navigation
+            Message::ToggleHelp => self.show_help = !self.show_help,
             Message::SelectRow(row) => self.select_row(row),
-
-            // Volume controls
             Message::VolumeUp(percentage) => {
                 self.increment_volume(percentage);
             }
             Message::VolumeDown(percentage) => {
                 self.decrement_volume(percentage);
             }
-
-            // Playback controls
             Message::PlayPause => {
                 let sink = &self.sink;
                 if sink.is_paused() {
@@ -229,6 +226,7 @@ impl Player {
 
         let model = Model {
             running_state: RunningState::Library,
+            show_help: false,
             tracks: Vec::new(),
             queue: Vec::new(),
             queue_index: Arc::new(Mutex::new(0)),
@@ -370,8 +368,16 @@ impl Player {
 
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
         match (key_event.modifiers, key_event.code) {
+            (_, _) if self.model.show_help => {
+                self.model.update(Message::ToggleHelp).await;
+            }
+
             (KeyModifiers::NONE, KeyCode::Char('q')) => {
                 self.model.update(Message::Quit).await;
+            }
+
+            (_, KeyCode::Char('?')) => {
+                self.model.update(Message::ToggleHelp).await;
             }
 
             // Navigation
@@ -465,6 +471,54 @@ impl Player {
         Self::render_table(&mut self.model, frame, primary_tab[0]);
         Self::render_sidebar(&mut self.model, frame, primary_tab[1]);
         Self::render_status_bar(&self.model, frame, panel_splits[1]);
+
+        if self.model.show_help {
+            Self::render_help(&self.model, frame);
+        }
+    }
+
+    fn render_help(_model: &Model, frame: &mut Frame) {
+        let area = frame.area();
+        let margin = 4;
+        let area = area.inner(Margin {
+            horizontal: margin * 2,
+            vertical: margin,
+        });
+
+        let binds = [
+            ("Help", "?"),
+            ("Quit", "q"),
+            ("Scroll Up", "k"),
+            ("Scroll Down", "j"),
+            ("Add to Queue", "Enter"),
+            ("Play/Pause", "p"),
+            ("Next Track", "n"),
+            ("Previous Track", "b"),
+        ];
+
+        let mut lines: Vec<Line> = binds
+            .iter()
+            .map(|(action, bind)| {
+                let bind = format!("<{bind}>");
+                let bind = format!("{bind: >20}");
+
+                let texts = vec![Span::raw(format!("{action: <20}")), Span::raw(bind).bold()];
+
+                Line::from(texts).centered()
+            })
+            .collect();
+        lines.push(Line::raw(""));
+        lines.push(Line::raw("Press any button to close this menu").centered());
+
+        let text = Text::from(lines);
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded);
+        let widget = Paragraph::new(text).block(block);
+
+        frame.render_widget(Clear, area);
+        frame.render_widget(widget, area);
     }
 
     fn render_status_bar(model: &Model, frame: &mut Frame, area: Rect) {
@@ -514,19 +568,7 @@ impl Player {
         frame.render_widget(&volume_gauge, gauge_layout[3]);
         frame.render_widget(&spacer, gauge_layout[4]);
 
-        let instructions: Vec<Span> = vec![
-            " Play/Pause ".into(),
-            "<p>".into(),
-            " Skip ".into(),
-            "<n>".into(),
-            " Prev ".into(),
-            "<b>".into(),
-            " Queue ".into(),
-            "<Enter>".into(),
-            " Quit ".into(),
-            "<q> ".into(),
-        ];
-        let instructions = Line::from(instructions).centered();
+        let instructions = Line::from("For help, press ?").centered();
 
         frame.render_widget(instructions, status_bar_layout[2]);
     }
