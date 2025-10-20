@@ -136,6 +136,8 @@ impl Model {
                 self.queue.lock().unwrap().push(track);
             }
             Message::QueueTrackNext(track) => {
+                let mut queue = self.queue.lock().unwrap();
+                queue.insert(*self.queue_index.lock().unwrap() + 1, track.clone());
                 if self.temp_queue.lock().unwrap().is_none() {
                     let v = vec![track];
                     self.temp_queue = Arc::new(Mutex::new(Some(v)));
@@ -184,30 +186,39 @@ impl Model {
         // Add song to queue. TODO: display error message when attempting to open an unsupported file
         if let Ok(decoder) = rodio::Decoder::try_from(file) {
             let sink_clone = sink.clone();
-            let on_track_end = move || {
-                match &*temp_queue.lock().unwrap() {
-                    Some(tracks) => {
-                        let to_append = tracks.clone();
-                        for track in to_append {
-                            let sink = sink_clone.clone();
-                            let queue = queue.clone();
-                            let queue_index = queue_index.clone();
-                            let temp_queue = temp_queue.clone();
-                            let temp_queue_index = temp_queue_index.clone();
-                            Self::add_track_to_sink(
-                                sink,
-                                &track,
-                                queue,
-                                queue_index,
-                                temp_queue,
-                                temp_queue_index,
-                            );
-                        }
-                        // If there is already a temp queue, put that in front
+            let on_track_end = move || match &*temp_queue.lock().unwrap() {
+                Some(tracks) => {
+                    sink_clone.clear();
+                    let to_append = tracks.clone();
+                    {
+                        let mut queue_index = queue_index.lock().unwrap();
+                        let mut queue = queue.lock().unwrap();
+
+                        *queue_index += 1;
+                        let mut tail = queue.split_off(*queue_index);
+                        queue.append(&mut tracks.clone());
+                        queue.append(&mut tail);
                     }
-                    None => {
-                        *queue_index.lock().unwrap() += 1;
+
+                    for track in to_append {
+                        let sink = sink_clone.clone();
+                        let queue = queue.clone();
+                        let queue_index = queue_index.clone();
+                        let temp_queue = Arc::new(Mutex::new(None));
+                        let temp_queue_index = temp_queue_index.clone();
+                        Self::add_track_to_sink(
+                            sink,
+                            &track,
+                            queue,
+                            queue_index,
+                            temp_queue,
+                            temp_queue_index,
+                        );
                     }
+                    sink_clone.play();
+                }
+                None => {
+                    *queue_index.lock().unwrap() += 1;
                 }
             };
             let source = WrappedSource::new(decoder, on_track_end);
@@ -216,11 +227,39 @@ impl Model {
     }
 
     fn next_track(&mut self) {
-        self.sink.skip_one();
-        let mut index = self.queue_index.lock().unwrap();
-        *index += 1;
-        if *index > self.queue.lock().unwrap().len() {
-            *index = self.queue.lock().unwrap().len();
+        let mut temp_queue = self.temp_queue.lock().unwrap();
+        match *temp_queue {
+            Some(_) => {
+                self.sink.clear();
+                *self.queue_index.lock().unwrap() += 1;
+                *temp_queue = None;
+                let iter = self
+                    .queue
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .into_iter()
+                    .skip(*self.queue_index.lock().unwrap());
+                for track in iter {
+                    Self::add_track_to_sink(
+                        self.sink.clone(),
+                        &track,
+                        self.queue.clone(),
+                        self.queue_index.clone(),
+                        self.temp_queue.clone(),
+                        self.temp_queue_index.clone(),
+                    );
+                }
+                self.sink.play();
+            }
+            None => {
+                self.sink.skip_one();
+                let mut index = self.queue_index.lock().unwrap();
+                *index += 1;
+                if *index > self.queue.lock().unwrap().len() {
+                    *index = self.queue.lock().unwrap().len();
+                }
+            }
         }
     }
 
@@ -511,9 +550,9 @@ impl Player {
                         .expect("Should be valid index")
                         .clone();
 
-                    if mods == KeyModifiers::NONE {
+                    if mods.is_empty() {
                         self.model.update(Message::QueueTrack(track)).await;
-                    } else if mods == KeyModifiers::SHIFT {
+                    } else if mods == KeyModifiers::ALT {
                         self.model.update(Message::QueueTrackNext(track)).await;
                     }
                 }
