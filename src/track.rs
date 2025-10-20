@@ -7,7 +7,12 @@ use std::{
 
 use color_eyre::{Result, eyre::eyre};
 use image::{DynamicImage, ImageReader};
-use lofty::{picture::Picture, prelude::*, probe::Probe};
+use lofty::{
+    picture::Picture,
+    prelude::*,
+    probe::Probe,
+    tag::{Tag, TagType},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -227,8 +232,9 @@ impl TryFrom<PathBuf> for Track {
         // generate an empty tag if none exist
         let tag = tagged_file
             .primary_tag()
-            .or_else(|| tagged_file.first_tag())
-            .ok_or(eyre!("Couldn't find tags from file"))?;
+            .cloned()
+            .or_else(|| tagged_file.first_tag().cloned())
+            .unwrap_or(Tag::new(TagType::Id3v2));
 
         let properties = tagged_file.properties();
 
