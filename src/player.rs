@@ -69,12 +69,18 @@ enum Message {
     SelectRow(usize),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RunningState {
+    Quit,
+    Library,
+}
+
 struct Model {
+    running_state: RunningState,
     tracks: Vec<Track>,
     queue: Vec<Track>,
     queue_index: Arc<Mutex<usize>>,
     volume_percentage: usize,
-    exit: bool,
 
     // UI related state
     theme: Theme,
@@ -94,7 +100,7 @@ struct Model {
 impl Model {
     async fn update(&mut self, message: Message) {
         match message {
-            Message::Quit => self.exit = true,
+            Message::Quit => self.running_state = RunningState::Quit,
 
             // Navigation
             Message::SelectRow(row) => self.select_row(row),
@@ -222,11 +228,11 @@ impl Player {
         let picker = Picker::from_query_stdio()?;
 
         let model = Model {
+            running_state: RunningState::Library,
             tracks: Vec::new(),
             queue: Vec::new(),
             queue_index: Arc::new(Mutex::new(0)),
             volume_percentage,
-            exit: false,
 
             theme: Theme::default(),
             table_state: TableState::default().with_selected(0),
@@ -305,7 +311,7 @@ impl Player {
                 last_tick = Instant::now();
             }
 
-            if self.model.exit {
+            if self.model.running_state == RunningState::Quit {
                 return Ok(());
             }
         }
