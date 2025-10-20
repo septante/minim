@@ -57,6 +57,18 @@ impl Default for Theme {
     }
 }
 
+#[derive(Debug, Clone)]
+enum Message {
+    Quit,
+    PlayPause,
+    NextTrack,
+    PrevTrack,
+    QueueTrack(Track),
+    VolumeUp(usize),
+    VolumeDown(usize),
+    SelectRow(usize),
+}
+
 struct Model {
     tracks: Vec<Track>,
     queue: Vec<Track>,
@@ -80,51 +92,23 @@ struct Model {
 }
 
 impl Model {
-    async fn handle_events(&mut self) -> std::io::Result<()> {
-        match event::read()? {
-            // it's important to check that the event is a key press event as
-            // crossterm also emits key release and repeat events on Windows.
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event).await
-            }
-            _ => {}
-        };
-        Ok(())
-    }
-
-    async fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match (key_event.modifiers, key_event.code) {
-            (KeyModifiers::NONE, KeyCode::Char('q')) => self.exit = true,
+    async fn update(&mut self, message: Message) {
+        match message {
+            Message::Quit => self.exit = true,
 
             // Navigation
-            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-                self.next_table_row().await;
-            }
-            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-                self.previous_table_row().await;
-            }
-            (_, KeyCode::Home) => {
-                self.select_row(0);
-            }
-            (_, KeyCode::End) => {
-                self.select_row(self.tracks.len() - 1);
-            }
+            Message::SelectRow(row) => self.select_row(row),
 
             // Volume controls
-            (_, KeyCode::Media(MediaKeyCode::LowerVolume))
-            | (KeyModifiers::CONTROL, KeyCode::Char('j'))
-            | (KeyModifiers::CONTROL, KeyCode::Down) => {
-                self.decrement_volume(5);
+            Message::VolumeUp(percentage) => {
+                self.increment_volume(percentage);
             }
-            (_, KeyCode::Media(MediaKeyCode::RaiseVolume))
-            | (KeyModifiers::CONTROL, KeyCode::Char('k'))
-            | (KeyModifiers::CONTROL, KeyCode::Up) => {
-                self.increment_volume(5);
+            Message::VolumeDown(percentage) => {
+                self.decrement_volume(percentage);
             }
 
             // Playback controls
-            (_, KeyCode::Media(MediaKeyCode::PlayPause))
-            | (KeyModifiers::NONE, KeyCode::Char('p')) => {
+            Message::PlayPause => {
                 let sink = &self.sink;
                 if sink.is_paused() {
                     sink.play();
@@ -132,23 +116,12 @@ impl Model {
                     sink.pause();
                 }
             }
-            (_, KeyCode::Media(MediaKeyCode::TrackPrevious))
-            | (KeyModifiers::NONE, KeyCode::Char('b')) => self.previous_track(),
-            (_, KeyCode::Media(MediaKeyCode::TrackNext))
-            | (KeyModifiers::NONE, KeyCode::Char('n')) => self.next_track(),
-            (KeyModifiers::NONE, KeyCode::Enter) => {
-                if let Some(index) = self.table_state.selected() {
-                    let track = self
-                        .tracks
-                        .get(index)
-                        .expect("Should be valid index")
-                        .clone();
-
-                    self.queue_track(&track);
-                    self.queue.push(track.clone());
-                }
+            Message::PrevTrack => self.previous_track(),
+            Message::NextTrack => self.next_track(),
+            Message::QueueTrack(track) => {
+                self.queue_track(&track);
+                self.queue.push(track);
             }
-            _ => {}
         }
     }
 
@@ -174,36 +147,6 @@ impl Model {
 
         self.last_scroll = Instant::now();
         self.needs_image_redraw = true;
-    }
-
-    async fn next_table_row(&mut self) {
-        let row = match self.table_state.selected() {
-            Some(i) => {
-                if i >= self.tracks.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-
-        self.select_row(row);
-    }
-
-    async fn previous_table_row(&mut self) {
-        let row = match self.table_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.tracks.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-
-        self.select_row(row);
     }
 
     /// Adds a [`Track`] to the [`Sink`]'s queue for playback. Note that this does not modify the internal [`queue`] field.
@@ -354,7 +297,7 @@ impl Player {
             terminal.draw(|frame| self.draw(frame))?;
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
-                self.model.handle_events().await?;
+                self.handle_events().await?;
             }
 
             if last_tick.elapsed() >= tick_rate {
@@ -405,6 +348,103 @@ impl Player {
         let image = picker.new_resize_protocol(image);
         let image = Some(image);
         *image_state.lock().unwrap() = image;
+    }
+
+    async fn handle_events(&mut self) -> std::io::Result<()> {
+        match event::read()? {
+            // it's important to check that the event is a key press event as
+            // crossterm also emits key release and repeat events on Windows.
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event).await
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    async fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match (key_event.modifiers, key_event.code) {
+            (KeyModifiers::NONE, KeyCode::Char('q')) => {
+                self.model.update(Message::Quit).await;
+            }
+
+            // Navigation
+            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+                let row = match self.model.table_state.selected() {
+                    Some(i) => {
+                        if i >= self.model.tracks.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectRow(row)).await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+                let row = match self.model.table_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.model.tracks.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectRow(row)).await;
+            }
+            (_, KeyCode::Home) => {
+                self.model.update(Message::SelectRow(0)).await;
+            }
+            (_, KeyCode::End) => {
+                self.model
+                    .update(Message::SelectRow(self.model.tracks.len() - 1))
+                    .await;
+            }
+
+            // Volume controls
+            (_, KeyCode::Media(MediaKeyCode::LowerVolume))
+            | (KeyModifiers::CONTROL, KeyCode::Char('j'))
+            | (KeyModifiers::CONTROL, KeyCode::Down) => {
+                self.model.update(Message::VolumeDown(5)).await;
+            }
+            (_, KeyCode::Media(MediaKeyCode::RaiseVolume))
+            | (KeyModifiers::CONTROL, KeyCode::Char('k'))
+            | (KeyModifiers::CONTROL, KeyCode::Up) => {
+                self.model.update(Message::VolumeUp(5)).await;
+            }
+
+            // Playback controls
+            (_, KeyCode::Media(MediaKeyCode::PlayPause))
+            | (KeyModifiers::NONE, KeyCode::Char('p')) => {
+                self.model.update(Message::PlayPause).await;
+            }
+            (_, KeyCode::Media(MediaKeyCode::TrackPrevious))
+            | (KeyModifiers::NONE, KeyCode::Char('b')) => {
+                self.model.update(Message::PrevTrack).await;
+            }
+            (_, KeyCode::Media(MediaKeyCode::TrackNext))
+            | (KeyModifiers::NONE, KeyCode::Char('n')) => {
+                self.model.update(Message::NextTrack).await;
+            }
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                if let Some(index) = self.model.table_state.selected() {
+                    let track = self
+                        .model
+                        .tracks
+                        .get(index)
+                        .expect("Should be valid index")
+                        .clone();
+
+                    self.model.update(Message::QueueTrack(track)).await;
+                }
+            }
+            _ => {}
+        }
     }
 
     fn draw(&mut self, frame: &mut Frame) {
