@@ -65,6 +65,7 @@ enum Message {
     NextTrack,
     PrevTrack,
     QueueTrack(Track),
+    QueueTrackNext(Track),
     VolumeUp(usize),
     VolumeDown(usize),
     SelectRow(usize),
@@ -80,8 +81,10 @@ struct Model {
     running_state: RunningState,
     show_help: bool,
     tracks: Vec<Track>,
-    queue: Vec<Track>,
+    queue: Arc<Mutex<Vec<Track>>>,
     queue_index: Arc<Mutex<usize>>,
+    temp_queue: Arc<Mutex<Option<Vec<Track>>>>,
+    temp_queue_index: Arc<Mutex<Option<usize>>>,
     volume_percentage: usize,
 
     // UI related state
@@ -93,7 +96,7 @@ struct Model {
 
     // Resources
     picker: Picker,
-    sink: Sink,
+    sink: Arc<Sink>,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
     // See https://github.com/RustAudio/rodio/issues/525
     _stream: OutputStream,
@@ -122,8 +125,21 @@ impl Model {
             Message::PrevTrack => self.previous_track(),
             Message::NextTrack => self.next_track(),
             Message::QueueTrack(track) => {
-                self.queue_track(&track);
-                self.queue.push(track);
+                Self::add_track_to_sink(
+                    self.sink.clone(),
+                    &track,
+                    self.queue.clone(),
+                    self.queue_index.clone(),
+                    self.temp_queue.clone(),
+                    self.temp_queue_index.clone(),
+                );
+                self.queue.lock().unwrap().push(track);
+            }
+            Message::QueueTrackNext(track) => {
+                if self.temp_queue.lock().unwrap().is_none() {
+                    let v = vec![track];
+                    self.temp_queue = Arc::new(Mutex::new(Some(v)));
+                }
             }
         }
     }
@@ -141,8 +157,9 @@ impl Model {
         self.sink.set_volume(self.volume_percentage as f32 / 100.0);
     }
 
-    fn now_playing(&self) -> Option<&Track> {
-        self.queue.get(*self.queue_index.lock().unwrap())
+    fn now_playing(&self) -> Option<Track> {
+        let tracks = self.queue.lock().unwrap();
+        tracks.get(*self.queue_index.lock().unwrap()).cloned()
     }
 
     fn select_row(&mut self, row: usize) {
@@ -153,18 +170,48 @@ impl Model {
     }
 
     /// Adds a [`Track`] to the [`Sink`]'s queue for playback. Note that this does not modify the internal [`queue`] field.
-    fn queue_track(&mut self, track: &Track) {
+    fn add_track_to_sink(
+        sink: Arc<Sink>,
+        track: &Track,
+        queue: Arc<Mutex<Vec<Track>>>,
+        queue_index: Arc<Mutex<usize>>,
+        temp_queue: Arc<Mutex<Option<Vec<Track>>>>,
+        temp_queue_index: Arc<Mutex<Option<usize>>>,
+    ) {
         let file = fs::File::open(&track.path)
             .expect("Path should be valid, since we imported these files at startup");
 
         // Add song to queue. TODO: display error message when attempting to open an unsupported file
         if let Ok(decoder) = rodio::Decoder::try_from(file) {
-            let queue_index = self.queue_index.clone();
+            let sink_clone = sink.clone();
             let on_track_end = move || {
-                *queue_index.lock().unwrap() += 1;
+                match &*temp_queue.lock().unwrap() {
+                    Some(tracks) => {
+                        let to_append = tracks.clone();
+                        for track in to_append {
+                            let sink = sink_clone.clone();
+                            let queue = queue.clone();
+                            let queue_index = queue_index.clone();
+                            let temp_queue = temp_queue.clone();
+                            let temp_queue_index = temp_queue_index.clone();
+                            Self::add_track_to_sink(
+                                sink,
+                                &track,
+                                queue,
+                                queue_index,
+                                temp_queue,
+                                temp_queue_index,
+                            );
+                        }
+                        // If there is already a temp queue, put that in front
+                    }
+                    None => {
+                        *queue_index.lock().unwrap() += 1;
+                    }
+                }
             };
             let source = WrappedSource::new(decoder, on_track_end);
-            self.sink.append(source);
+            sink.append(source);
         }
     }
 
@@ -172,8 +219,8 @@ impl Model {
         self.sink.skip_one();
         let mut index = self.queue_index.lock().unwrap();
         *index += 1;
-        if *index > self.queue.len() {
-            *index = self.queue.len();
+        if *index > self.queue.lock().unwrap().len() {
+            *index = self.queue.lock().unwrap().len();
         }
     }
 
@@ -189,11 +236,20 @@ impl Model {
 
         let iter = self
             .queue
+            .lock()
+            .unwrap()
             .clone()
             .into_iter()
             .skip(*self.queue_index.lock().unwrap());
         for track in iter {
-            self.queue_track(&track);
+            Self::add_track_to_sink(
+                self.sink.clone(),
+                &track,
+                self.queue.clone(),
+                self.queue_index.clone(),
+                self.temp_queue.clone(),
+                self.temp_queue_index.clone(),
+            );
         }
         self.sink.play();
     }
@@ -210,7 +266,7 @@ impl Player {
     /// Create a new player instance
     pub async fn new(args: Args) -> Result<Self> {
         let stream_handle = OutputStreamBuilder::open_default_stream()?;
-        let sink = rodio::Sink::connect_new(stream_handle.mixer());
+        let sink = Arc::new(rodio::Sink::connect_new(stream_handle.mixer()));
         let volume_percentage = 50;
         sink.set_volume(volume_percentage as f32 / 100.0);
 
@@ -228,8 +284,11 @@ impl Player {
             running_state: RunningState::Library,
             show_help: false,
             tracks: Vec::new(),
-            queue: Vec::new(),
+            queue: Arc::new(Mutex::new(Vec::new())),
             queue_index: Arc::new(Mutex::new(0)),
+            temp_queue: Arc::new(Mutex::new(None)),
+            temp_queue_index: Arc::new(Mutex::new(None)),
+
             volume_percentage,
 
             theme: Theme::default(),
@@ -443,7 +502,7 @@ impl Player {
             | (KeyModifiers::NONE, KeyCode::Char('n')) => {
                 self.model.update(Message::NextTrack).await;
             }
-            (KeyModifiers::NONE, KeyCode::Enter) => {
+            (mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.table_state.selected() {
                     let track = self
                         .model
@@ -452,7 +511,11 @@ impl Player {
                         .expect("Should be valid index")
                         .clone();
 
-                    self.model.update(Message::QueueTrack(track)).await;
+                    if mods == KeyModifiers::NONE {
+                        self.model.update(Message::QueueTrack(track)).await;
+                    } else if mods == KeyModifiers::SHIFT {
+                        self.model.update(Message::QueueTrackNext(track)).await;
+                    }
                 }
             }
             _ => {}
@@ -621,14 +684,20 @@ impl Player {
             Constraint::Min(6),
         ];
         let table = Table::new(
-            model.queue.iter().enumerate().map(|(index, track)| {
-                let index = index + 1;
-                Row::new(vec![
-                    Text::from(format!("{index}")),
-                    Text::from(track.cached_field_string(CachedField::Title)),
-                    Text::from(track.cached_field_string(CachedField::Duration)),
-                ])
-            }),
+            model
+                .queue
+                .lock()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(index, track)| {
+                    let index = index + 1;
+                    Row::new(vec![
+                        Text::from(format!("{index}")),
+                        Text::from(track.cached_field_string(CachedField::Title)),
+                        Text::from(track.cached_field_string(CachedField::Duration)),
+                    ])
+                }),
             widths,
         );
         let block = Block::new().borders(Borders::all());
