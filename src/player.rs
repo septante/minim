@@ -206,6 +206,7 @@ impl Model {
         self.select_row(row);
     }
 
+    /// Adds a [`Track`] to the [`Sink`]'s queue for playback. Note that this does not modify the internal [`queue`] field.
     fn queue_track(&mut self, track: &Track) {
         let file = fs::File::open(&track.path)
             .expect("Path should be valid, since we imported these files at startup");
