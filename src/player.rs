@@ -355,7 +355,7 @@ impl Player {
             // it's important to check that the event is a key press event as
             // crossterm also emits key release and repeat events on Windows.
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event).await
+                self.handle_key_event(key_event).await;
             }
             _ => {}
         };
