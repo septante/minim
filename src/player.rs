@@ -193,19 +193,15 @@ impl Model {
             let on_track_end = move || {
                 let mut queue_index_guard = queue_index.lock().unwrap();
                 *queue_index_guard += 1;
-                let track = queue
-                    .clone()
-                    .lock()
-                    .unwrap()
-                    .get(*queue_index_guard)
-                    .unwrap()
-                    .clone();
-                Self::play_track(
-                    track,
-                    sink_clone.clone(),
-                    queue.clone(),
-                    queue_index.clone(),
-                );
+
+                if let Some(track) = queue.clone().lock().unwrap().get(*queue_index_guard) {
+                    Self::play_track(
+                        track.clone(),
+                        sink_clone.clone(),
+                        queue.clone(),
+                        queue_index.clone(),
+                    );
+                }
             };
             let source = WrappedSource::new(decoder, on_track_end);
             sink.append(source);
