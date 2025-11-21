@@ -68,6 +68,7 @@ enum Message {
     QueueTrackNext(Track),
     VolumeUp(usize),
     VolumeDown(usize),
+    CycleRepeatMode,
     SelectRow(usize),
 }
 
@@ -77,14 +78,18 @@ enum RunningState {
     Library,
 }
 
+#[derive(Debug, Clone)]
+enum RepeatMode {
+    Off,
+    Queue,
+    Single,
+}
+
 struct Model {
     running_state: RunningState,
     show_help: bool,
     tracks: Vec<Track>,
-    queue: Arc<Mutex<Vec<Track>>>,
-    queue_index: Arc<Mutex<usize>>,
-    /// Where to insert [`Track`]s when adding to middle of queue
-    insertion_offset: Arc<Mutex<usize>>,
+    playback_state: PlaybackState,
     volume_percentage: usize,
 
     // UI related state
@@ -96,10 +101,19 @@ struct Model {
 
     // Resources
     picker: Picker,
-    sink: Arc<Sink>,
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
     // See https://github.com/RustAudio/rodio/issues/525
     _stream: OutputStream,
+}
+
+#[derive(Clone)]
+struct PlaybackState {
+    sink: Arc<Sink>,
+    queue: Arc<Mutex<Vec<Track>>>,
+    queue_index: Arc<Mutex<usize>>,
+    /// Where to insert [`Track`]s when adding to middle of queue
+    insertion_offset: Arc<Mutex<usize>>,
+    repeat_mode: Arc<Mutex<RepeatMode>>,
 }
 
 impl Model {
@@ -115,8 +129,11 @@ impl Model {
             Message::VolumeDown(percentage) => {
                 self.decrement_volume(percentage);
             }
+            Message::CycleRepeatMode => {
+                self.cycle_repeat_mode();
+            }
             Message::PlayPause => {
-                let sink = &self.sink;
+                let sink = &self.playback_state.sink;
                 if sink.is_paused() {
                     sink.play();
                 } else {
@@ -127,36 +144,34 @@ impl Model {
             Message::NextTrack => self.next_track(),
             Message::QueueTrack(track) => {
                 self.queue_track(track.clone());
-                if self.sink.empty() {
-                    Self::play_track(
-                        &track,
-                        self.sink.clone(),
-                        self.queue.clone(),
-                        self.queue_index.clone(),
-                        self.insertion_offset.clone(),
-                    );
+                if self.playback_state.sink.empty() {
+                    Self::play_track(&track, &self.playback_state);
                 }
             }
             Message::QueueTrackNext(track) => {
-                let index = *self.queue_index.lock().unwrap();
-                let mut offset = self.insertion_offset.lock().unwrap();
-                self.queue
+                let index = *self.playback_state.queue_index.lock().unwrap();
+                let mut offset = self.playback_state.insertion_offset.lock().unwrap();
+                self.playback_state
+                    .queue
                     .lock()
                     .unwrap()
                     .insert(index + *offset + 1, track.clone());
 
                 *offset += 1;
 
-                if self.sink.empty() {
-                    Self::play_track(
-                        &track,
-                        self.sink.clone(),
-                        self.queue.clone(),
-                        self.queue_index.clone(),
-                        self.insertion_offset.clone(),
-                    );
+                if self.playback_state.sink.empty() {
+                    Self::play_track(&track, &self.playback_state.clone());
                 }
             }
+        }
+    }
+
+    fn cycle_repeat_mode(&mut self) {
+        let mut repeat_mode = self.playback_state.repeat_mode.lock().unwrap();
+        *repeat_mode = match *repeat_mode {
+            RepeatMode::Off => RepeatMode::Queue,
+            RepeatMode::Queue => RepeatMode::Single,
+            RepeatMode::Single => RepeatMode::Off,
         }
     }
 
@@ -165,18 +180,24 @@ impl Model {
         if self.volume_percentage > 100 {
             self.volume_percentage = 100;
         }
-        self.sink.set_volume(self.volume_percentage as f32 / 100.0);
+        self.playback_state
+            .sink
+            .set_volume(self.volume_percentage as f32 / 100.0);
     }
 
     fn decrement_volume(&mut self, percentage: usize) {
         self.volume_percentage = self.volume_percentage.saturating_sub(percentage);
-        self.sink.set_volume(self.volume_percentage as f32 / 100.0);
+        self.playback_state
+            .sink
+            .set_volume(self.volume_percentage as f32 / 100.0);
     }
 
     /// Gets the currently playing [`Track`]
     fn now_playing(&self) -> Option<Track> {
-        let queue_guard = self.queue.lock().unwrap();
-        queue_guard.get(*self.queue_index.lock().unwrap()).cloned()
+        let queue_guard = self.playback_state.queue.lock().unwrap();
+        queue_guard
+            .get(*self.playback_state.queue_index.lock().unwrap())
+            .cloned()
     }
 
     fn select_row(&mut self, row: usize) {
@@ -188,80 +209,70 @@ impl Model {
 
     /// Adds a [`Track`] to the queue. Does not add it to the [`Sink`]
     fn queue_track(&mut self, track: Track) {
-        self.queue.lock().unwrap().push(track);
+        self.playback_state.queue.lock().unwrap().push(track);
     }
 
     /// Adds a [`Track`] to the [`Sink`] for playback
-    fn play_track(
-        track: &Track,
-        sink: Arc<Sink>,
-        queue: Arc<Mutex<Vec<Track>>>,
-        queue_index: Arc<Mutex<usize>>,
-        insertion_offset: Arc<Mutex<usize>>,
-    ) {
+    fn play_track(track: &Track, playback_state: &PlaybackState) {
         let file = fs::File::open(&track.path)
             .expect("Path should be valid, since we imported these files at startup");
 
         // Add song to queue. TODO: display error message when attempting to open an unsupported file
         if let Ok(decoder) = rodio::Decoder::try_from(file) {
-            let sink_clone = sink.clone();
-            *insertion_offset.lock().unwrap() = 0;
+            *playback_state.insertion_offset.lock().unwrap() = 0;
 
+            let playback_clone = playback_state.clone();
             let on_track_end = move || {
-                let mut queue_index_guard = queue_index.lock().unwrap();
-                *queue_index_guard += 1;
-
-                if let Some(track) = queue.clone().lock().unwrap().get(*queue_index_guard) {
-                    Self::play_track(
-                        track,
-                        sink_clone.clone(),
-                        queue.clone(),
-                        queue_index.clone(),
-                        insertion_offset.clone(),
-                    );
+                let mut queue_index = playback_clone.queue_index.lock().unwrap();
+                let queue = playback_clone.queue.lock().unwrap();
+                match *playback_clone.repeat_mode.lock().unwrap() {
+                    RepeatMode::Off => {
+                        *queue_index += 1;
+                    }
+                    RepeatMode::Queue => {
+                        *queue_index += 1;
+                        if *queue_index >= queue.len() {
+                            *queue_index = 0;
+                        }
+                    }
+                    RepeatMode::Single => {
+                        // Do nothing because we want to play the same track
+                    }
+                }
+                if let Some(track) = queue.get(*queue_index) {
+                    Self::play_track(track, &playback_clone);
                 }
             };
+
             let source = WrappedSource::new(decoder, on_track_end);
-            sink.append(source);
+            playback_state.sink.append(source);
         }
     }
 
     /// Skips to the next [`Track`] in the queue. If on the last track, stops playback.
     fn next_track(&mut self) {
-        self.sink.stop();
-        let mut index = self.queue_index.lock().unwrap();
+        self.playback_state.sink.stop();
+        let mut index = self.playback_state.queue_index.lock().unwrap();
         *index += 1;
-        let queue = self.queue.lock().unwrap();
+        let queue = self.playback_state.queue.lock().unwrap();
         if *index >= queue.len() {
             *index = queue.len();
         } else {
-            Self::play_track(
-                queue.get(*index).unwrap(),
-                self.sink.clone(),
-                self.queue.clone(),
-                self.queue_index.clone(),
-                self.insertion_offset.clone(),
-            );
+            Self::play_track(queue.get(*index).unwrap(), &self.playback_state);
         }
     }
 
     /// Plays the previous [`Track`] in the queue. If currently on the first track, restarts playback.
     fn previous_track(&mut self) {
-        self.sink.stop();
+        self.playback_state.sink.stop();
 
-        let mut index = self.queue_index.lock().unwrap();
+        let mut index = self.playback_state.queue_index.lock().unwrap();
         if *index > 0 {
             *index -= 1;
         }
 
-        let queue = self.queue.lock().unwrap();
-        Self::play_track(
-            queue.get(*index).unwrap(),
-            self.sink.clone(),
-            self.queue.clone(),
-            self.queue_index.clone(),
-            self.insertion_offset.clone(),
-        );
+        let queue = self.playback_state.queue.lock().unwrap();
+        Self::play_track(&queue.get(*index).unwrap().clone(), &self.playback_state);
     }
 }
 
@@ -290,14 +301,19 @@ impl Player {
         };
 
         let picker = Picker::from_query_stdio()?;
+        let playback_state = PlaybackState {
+            queue: Arc::new(Mutex::new(Vec::new())),
+            queue_index: Arc::new(Mutex::new(0)),
+            insertion_offset: Arc::new(Mutex::new(0)),
+            repeat_mode: Arc::new(Mutex::new(RepeatMode::Off)),
+            sink,
+        };
 
         let model = Model {
             running_state: RunningState::Library,
             show_help: false,
             tracks: Vec::new(),
-            queue: Arc::new(Mutex::new(Vec::new())),
-            queue_index: Arc::new(Mutex::new(0)),
-            insertion_offset: Arc::new(Mutex::new(0)),
+            playback_state,
             volume_percentage,
 
             theme: Theme::default(),
@@ -308,7 +324,6 @@ impl Player {
             needs_image_redraw: true,
 
             picker,
-            sink,
             _stream: stream_handle,
         };
 
@@ -511,6 +526,9 @@ impl Player {
             | (KeyModifiers::NONE, KeyCode::Char('n')) => {
                 self.model.update(Message::NextTrack).await;
             }
+            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+                self.model.update(Message::CycleRepeatMode).await;
+            }
             (mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.table_state.selected() {
                     let track = self
@@ -614,7 +632,7 @@ impl Player {
         let track = model.now_playing();
         let (label, ratio) = match track {
             Some(track) => {
-                let time = model.sink.get_pos();
+                let time = model.playback_state.sink.get_pos();
                 let duration = track.duration;
                 let ratio = time.as_secs() as f64 / duration as f64;
 
@@ -699,6 +717,7 @@ impl Player {
         ];
         let table = Table::new(
             model
+                .playback_state
                 .queue
                 .lock()
                 .unwrap()
