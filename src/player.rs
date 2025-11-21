@@ -126,7 +126,7 @@ impl Model {
                 self.queue_track(track.clone());
                 if self.sink.empty() {
                     Self::play_track(
-                        track,
+                        &track,
                         self.sink.clone(),
                         self.queue.clone(),
                         self.queue_index.clone(),
@@ -138,7 +138,7 @@ impl Model {
                 self.queue.lock().unwrap().insert(index + 1, track.clone());
                 if self.sink.empty() {
                     Self::play_track(
-                        track,
+                        &track,
                         self.sink.clone(),
                         self.queue.clone(),
                         self.queue_index.clone(),
@@ -178,7 +178,7 @@ impl Model {
     }
 
     fn play_track(
-        track: Track,
+        track: &Track,
         sink: Arc<Sink>,
         queue: Arc<Mutex<Vec<Track>>>,
         queue_index: Arc<Mutex<usize>>,
@@ -196,7 +196,7 @@ impl Model {
 
                 if let Some(track) = queue.clone().lock().unwrap().get(*queue_index_guard) {
                     Self::play_track(
-                        track.clone(),
+                        track,
                         sink_clone.clone(),
                         queue.clone(),
                         queue_index.clone(),
@@ -217,7 +217,7 @@ impl Model {
             *index = queue.len();
         } else {
             Self::play_track(
-                queue.get(*index).unwrap().clone(),
+                queue.get(*index).unwrap(),
                 self.sink.clone(),
                 self.queue.clone(),
                 self.queue_index.clone(),
@@ -235,7 +235,7 @@ impl Model {
 
         let queue = self.queue.lock().unwrap();
         Self::play_track(
-            queue.get(*index).unwrap().clone(),
+            queue.get(*index).unwrap(),
             self.sink.clone(),
             self.queue.clone(),
             self.queue_index.clone(),
