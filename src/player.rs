@@ -101,6 +101,7 @@ struct Model {
 }
 
 impl Model {
+    /// Handles incoming [`Message`]s
     async fn update(&mut self, message: Message) {
         match message {
             Message::Quit => self.running_state = RunningState::Quit,
@@ -161,6 +162,7 @@ impl Model {
         self.sink.set_volume(self.volume_percentage as f32 / 100.0);
     }
 
+    /// Gets the currently playing [`Track`]
     fn now_playing(&self) -> Option<Track> {
         let queue_guard = self.queue.lock().unwrap();
         queue_guard.get(*self.queue_index.lock().unwrap()).cloned()
@@ -173,10 +175,12 @@ impl Model {
         self.needs_image_redraw = true;
     }
 
+    /// Adds a [`Track`] to the queue. Does not add it to the [`Sink`]
     fn queue_track(&mut self, track: Track) {
         self.queue.lock().unwrap().push(track);
     }
 
+    /// Adds a [`Track`] to the [`Sink`] for playback
     fn play_track(
         track: &Track,
         sink: Arc<Sink>,
@@ -208,6 +212,7 @@ impl Model {
         }
     }
 
+    /// Skips to the next [`Track`] in the queue. If on the last track, stops playback.
     fn next_track(&mut self) {
         self.sink.stop();
         let mut index = self.queue_index.lock().unwrap();
@@ -225,6 +230,7 @@ impl Model {
         }
     }
 
+    /// Plays the previous [`Track`] in the queue. If currently on the first track, restarts playback.
     fn previous_track(&mut self) {
         self.sink.stop();
 
