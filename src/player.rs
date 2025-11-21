@@ -65,6 +65,7 @@ enum Message {
     NextTrack,
     PrevTrack,
     QueueTrack(Track),
+    QueueTrackNext(Track),
     VolumeUp(usize),
     VolumeDown(usize),
     SelectRow(usize),
@@ -123,6 +124,18 @@ impl Model {
             Message::NextTrack => self.next_track(),
             Message::QueueTrack(track) => {
                 self.queue_track(track.clone());
+                if self.sink.empty() {
+                    Self::play_track(
+                        track,
+                        self.sink.clone(),
+                        self.queue.clone(),
+                        self.queue_index.clone(),
+                    );
+                }
+            }
+            Message::QueueTrackNext(track) => {
+                let index = *self.queue_index.lock().unwrap();
+                self.queue.lock().unwrap().insert(index + 1, track.clone());
                 if self.sink.empty() {
                     Self::play_track(
                         track,
@@ -479,7 +492,7 @@ impl Player {
             | (KeyModifiers::NONE, KeyCode::Char('n')) => {
                 self.model.update(Message::NextTrack).await;
             }
-            (KeyModifiers::NONE, KeyCode::Enter) => {
+            (mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.table_state.selected() {
                     let track = self
                         .model
@@ -488,7 +501,15 @@ impl Player {
                         .expect("Should be valid index")
                         .clone();
 
-                    self.model.update(Message::QueueTrack(track)).await;
+                    match mods {
+                        KeyModifiers::ALT => {
+                            self.model.update(Message::QueueTrackNext(track)).await;
+                        }
+
+                        _ => {
+                            self.model.update(Message::QueueTrack(track)).await;
+                        }
+                    }
                 }
             }
             _ => {}
@@ -527,6 +548,7 @@ impl Player {
             ("Scroll Up", "k"),
             ("Scroll Down", "j"),
             ("Add to Queue", "Enter"),
+            ("Queue Next", "Alt+Enter"),
             ("Play/Pause", "p"),
             ("Next Track", "n"),
             ("Previous Track", "b"),
