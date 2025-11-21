@@ -204,7 +204,6 @@ impl Model {
 
         // Add song to queue. TODO: display error message when attempting to open an unsupported file
         if let Ok(decoder) = rodio::Decoder::try_from(file) {
-            let queue_index = queue_index.clone();
             let sink_clone = sink.clone();
             *insertion_offset.lock().unwrap() = 0;
 
