@@ -85,6 +85,16 @@ enum RepeatMode {
     Single,
 }
 
+#[derive(Clone)]
+struct PlaybackState {
+    sink: Arc<Sink>,
+    queue: Arc<Mutex<Vec<Track>>>,
+    queue_index: Arc<Mutex<usize>>,
+    /// Where to insert [`Track`]s when adding to middle of queue
+    insertion_offset: Arc<Mutex<usize>>,
+    repeat_mode: Arc<Mutex<RepeatMode>>,
+}
+
 struct Model {
     running_state: RunningState,
     show_help: bool,
@@ -104,16 +114,6 @@ struct Model {
     // We need to hold the stream to prevent it from being dropped, even if we don't access it otherwise
     // See https://github.com/RustAudio/rodio/issues/525
     _stream: OutputStream,
-}
-
-#[derive(Clone)]
-struct PlaybackState {
-    sink: Arc<Sink>,
-    queue: Arc<Mutex<Vec<Track>>>,
-    queue_index: Arc<Mutex<usize>>,
-    /// Where to insert [`Track`]s when adding to middle of queue
-    insertion_offset: Arc<Mutex<usize>>,
-    repeat_mode: Arc<Mutex<RepeatMode>>,
 }
 
 impl Model {
