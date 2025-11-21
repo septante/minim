@@ -252,13 +252,23 @@ impl Model {
     /// Skips to the next [`Track`] in the queue. If on the last track, stops playback.
     fn next_track(&mut self) {
         self.playback_state.sink.stop();
-        let mut index = self.playback_state.queue_index.lock().unwrap();
-        *index += 1;
+        let mut queue_index = self.playback_state.queue_index.lock().unwrap();
         let queue = self.playback_state.queue.lock().unwrap();
-        if *index >= queue.len() {
-            *index = queue.len();
-        } else {
-            Self::play_track(queue.get(*index).unwrap(), &self.playback_state);
+        match *self.playback_state.repeat_mode.lock().unwrap() {
+            // Note that the behavior here is different from if the track ends normally
+            // If we are hitting next we should go to the next track even when repeat is set to single
+            RepeatMode::Off | RepeatMode::Single => {
+                *queue_index += 1;
+            }
+            RepeatMode::Queue => {
+                *queue_index += 1;
+                if *queue_index >= queue.len() {
+                    *queue_index = 0;
+                }
+            }
+        }
+        if let Some(track) = queue.get(*queue_index) {
+            Self::play_track(track, &self.playback_state);
         }
     }
 
