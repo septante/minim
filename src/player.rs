@@ -83,6 +83,8 @@ struct Model {
     tracks: Vec<Track>,
     queue: Arc<Mutex<Vec<Track>>>,
     queue_index: Arc<Mutex<usize>>,
+    /// Where to insert [`Track`]s when adding to middle of queue
+    insertion_offset: Arc<Mutex<usize>>,
     volume_percentage: usize,
 
     // UI related state
@@ -131,18 +133,27 @@ impl Model {
                         self.sink.clone(),
                         self.queue.clone(),
                         self.queue_index.clone(),
+                        self.insertion_offset.clone(),
                     );
                 }
             }
             Message::QueueTrackNext(track) => {
                 let index = *self.queue_index.lock().unwrap();
-                self.queue.lock().unwrap().insert(index + 1, track.clone());
+                let mut offset = self.insertion_offset.lock().unwrap();
+                self.queue
+                    .lock()
+                    .unwrap()
+                    .insert(index + *offset + 1, track.clone());
+
+                *offset += 1;
+
                 if self.sink.empty() {
                     Self::play_track(
                         &track,
                         self.sink.clone(),
                         self.queue.clone(),
                         self.queue_index.clone(),
+                        self.insertion_offset.clone(),
                     );
                 }
             }
@@ -186,6 +197,7 @@ impl Model {
         sink: Arc<Sink>,
         queue: Arc<Mutex<Vec<Track>>>,
         queue_index: Arc<Mutex<usize>>,
+        insertion_offset: Arc<Mutex<usize>>,
     ) {
         let file = fs::File::open(&track.path)
             .expect("Path should be valid, since we imported these files at startup");
@@ -194,6 +206,8 @@ impl Model {
         if let Ok(decoder) = rodio::Decoder::try_from(file) {
             let queue_index = queue_index.clone();
             let sink_clone = sink.clone();
+            *insertion_offset.lock().unwrap() = 0;
+
             let on_track_end = move || {
                 let mut queue_index_guard = queue_index.lock().unwrap();
                 *queue_index_guard += 1;
@@ -204,6 +218,7 @@ impl Model {
                         sink_clone.clone(),
                         queue.clone(),
                         queue_index.clone(),
+                        insertion_offset.clone(),
                     );
                 }
             };
@@ -226,6 +241,7 @@ impl Model {
                 self.sink.clone(),
                 self.queue.clone(),
                 self.queue_index.clone(),
+                self.insertion_offset.clone(),
             );
         }
     }
@@ -245,6 +261,7 @@ impl Model {
             self.sink.clone(),
             self.queue.clone(),
             self.queue_index.clone(),
+            self.insertion_offset.clone(),
         );
     }
 }
@@ -281,6 +298,7 @@ impl Player {
             tracks: Vec::new(),
             queue: Arc::new(Mutex::new(Vec::new())),
             queue_index: Arc::new(Mutex::new(0)),
+            insertion_offset: Arc::new(Mutex::new(0)),
             volume_percentage,
 
             theme: Theme::default(),
