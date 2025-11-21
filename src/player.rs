@@ -595,10 +595,13 @@ impl Player {
             ("Scroll Up", "k"),
             ("Scroll Down", "j"),
             ("Add to Queue", "Enter"),
-            ("Queue Next", "Alt+Enter"),
+            ("Queue Next", "A-Enter"),
             ("Play/Pause", "p"),
             ("Next Track", "n"),
             ("Previous Track", "b"),
+            ("Volume Up", "C-k"),
+            ("Volume Down", "C-j"),
+            ("Change Repeat Mode", "r"),
         ];
 
         let mut lines: Vec<Line> = binds
