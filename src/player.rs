@@ -348,7 +348,7 @@ impl Player {
             Track::compare_by_fields(
                 a,
                 b,
-                vec![CachedField::Artist, CachedField::Album, CachedField::Title],
+                &[CachedField::Artist, CachedField::Album, CachedField::Title],
             )
         });
 

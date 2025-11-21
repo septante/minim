@@ -172,7 +172,7 @@ impl Track {
     /// ```
     // Adapted from https://stackoverflow.com/questions/46512227/sort-a-vector-with-a-comparator-which-changes-its-behavior-dynamically/46514082#46514082
     // TODO: Allow inverting the sort
-    pub fn compare_by_fields(a: &Self, b: &Self, fields: Vec<CachedField>) -> Ordering {
+    pub fn compare_by_fields(a: &Self, b: &Self, fields: &[CachedField]) -> Ordering {
         fields.iter().fold(Ordering::Equal, |prev, &field| {
             prev.then_with(|| match field {
                 CachedField::Title => Self::case_insensitive_cmp(&a.title, &b.title),
