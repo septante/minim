@@ -40,8 +40,10 @@ pub struct Args {
 #[non_exhaustive]
 /// Theme data for the player UI
 struct Theme {
-    table_selected_row_bg: Color,
-    table_selected_row_fg: Color,
+    table_selected_row_bg_focused: Color,
+    table_selected_row_fg_focused: Color,
+    table_selected_row_bg_unfocused: Color,
+    table_selected_row_fg_unfocused: Color,
     progress_bar_unfilled: Color,
     progress_bar_filled: Color,
     sidebar_now_playing_fg: Color,
@@ -51,8 +53,10 @@ struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            table_selected_row_bg: Color::Blue,
-            table_selected_row_fg: Color::Black,
+            table_selected_row_bg_focused: Color::Blue,
+            table_selected_row_fg_focused: Color::Black,
+            table_selected_row_bg_unfocused: Color::Gray,
+            table_selected_row_fg_unfocused: Color::Black,
             progress_bar_unfilled: Color::White,
             progress_bar_filled: Color::Blue,
             sidebar_now_playing_fg: Color::Blue,
@@ -65,6 +69,9 @@ impl Default for Theme {
 enum Message {
     Quit,
     ToggleHelp,
+    FocusLibrary,
+    FocusSidebar,
+
     PlayPause,
     NextTrack,
     PrevTrack,
@@ -81,6 +88,7 @@ enum Message {
 enum RunningState {
     Quit,
     Library,
+    Sidebar,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -144,6 +152,14 @@ impl Model {
             Message::Quit => self.running_state = RunningState::Quit,
             Message::ToggleHelp => self.show_help = !self.show_help,
             Message::SelectRow(row) => self.select_row(row),
+            Message::FocusLibrary => {
+                self.running_state = RunningState::Library;
+            }
+            Message::FocusSidebar => {
+                self.running_state = RunningState::Sidebar;
+            }
+
+            // Playback controls
             Message::VolumeUp(percentage) => {
                 self.increment_volume(percentage);
             }
@@ -503,7 +519,17 @@ impl Player {
                 self.model.update(Message::ToggleHelp).await;
             }
 
-            // Navigation
+            // Focus navigation
+            (RunningState::Library, KeyModifiers::CONTROL, KeyCode::Char('l'))
+            | (RunningState::Library, KeyModifiers::CONTROL, KeyCode::Right) => {
+                self.model.update(Message::FocusSidebar).await;
+            }
+            (RunningState::Sidebar, KeyModifiers::CONTROL, KeyCode::Char('h'))
+            | (RunningState::Sidebar, KeyModifiers::CONTROL, KeyCode::Left) => {
+                self.model.update(Message::FocusLibrary).await;
+            }
+
+            // Library navigation
             (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('j'))
             | (RunningState::Library, KeyModifiers::NONE, KeyCode::Down) => {
                 let row = match self.model.table_state.selected() {
@@ -720,9 +746,15 @@ impl Player {
     }
 
     fn render_table(model: &mut Model, frame: &mut Frame, area: Rect) {
-        let selected_row_style = Style::default()
-            .bg(model.theme.table_selected_row_bg)
-            .fg(model.theme.table_selected_row_fg);
+        let selected_row_style = if model.running_state == RunningState::Library {
+            Style::default()
+                .bg(model.theme.table_selected_row_bg_focused)
+                .fg(model.theme.table_selected_row_fg_focused)
+        } else {
+            Style::default()
+                .bg(model.theme.table_selected_row_bg_unfocused)
+                .fg(model.theme.table_selected_row_fg_unfocused)
+        };
 
         let header = ["Title", "Artist", "Duration"]
             .into_iter()
