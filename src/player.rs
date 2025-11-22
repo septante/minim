@@ -486,21 +486,26 @@ impl Player {
     }
 
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match (key_event.modifiers, key_event.code) {
-            (_, _) if self.model.show_help => {
+        match (
+            &self.model.running_state,
+            key_event.modifiers,
+            key_event.code,
+        ) {
+            (_, _, _) if self.model.show_help => {
                 self.model.update(Message::ToggleHelp).await;
             }
 
-            (KeyModifiers::NONE, KeyCode::Char('q')) => {
+            (_, KeyModifiers::NONE, KeyCode::Char('q')) => {
                 self.model.update(Message::Quit).await;
             }
 
-            (_, KeyCode::Char('?')) => {
+            (_, _, KeyCode::Char('?')) => {
                 self.model.update(Message::ToggleHelp).await;
             }
 
             // Navigation
-            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+            (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('j'))
+            | (RunningState::Library, KeyModifiers::NONE, KeyCode::Down) => {
                 let row = match self.model.table_state.selected() {
                     Some(i) => {
                         if i >= self.model.tracks.len() - 1 {
@@ -514,7 +519,8 @@ impl Player {
 
                 self.model.update(Message::SelectRow(row)).await;
             }
-            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+            (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('k'))
+            | (RunningState::Library, KeyModifiers::NONE, KeyCode::Up) => {
                 let row = match self.model.table_state.selected() {
                     Some(i) => {
                         if i == 0 {
@@ -528,49 +534,49 @@ impl Player {
 
                 self.model.update(Message::SelectRow(row)).await;
             }
-            (_, KeyCode::Home) => {
+            (RunningState::Library, _, KeyCode::Home) => {
                 self.model.update(Message::SelectRow(0)).await;
             }
-            (_, KeyCode::End) => {
+            (RunningState::Library, _, KeyCode::End) => {
                 self.model
                     .update(Message::SelectRow(self.model.tracks.len() - 1))
                     .await;
             }
 
             // Volume controls
-            (_, KeyCode::Media(MediaKeyCode::LowerVolume))
-            | (KeyModifiers::CONTROL, KeyCode::Char('j'))
-            | (KeyModifiers::CONTROL, KeyCode::Down) => {
+            (_, _, KeyCode::Media(MediaKeyCode::LowerVolume))
+            | (_, KeyModifiers::CONTROL, KeyCode::Char('j'))
+            | (_, KeyModifiers::CONTROL, KeyCode::Down) => {
                 self.model.update(Message::VolumeDown(5)).await;
             }
-            (_, KeyCode::Media(MediaKeyCode::RaiseVolume))
-            | (KeyModifiers::CONTROL, KeyCode::Char('k'))
-            | (KeyModifiers::CONTROL, KeyCode::Up) => {
+            (_, _, KeyCode::Media(MediaKeyCode::RaiseVolume))
+            | (_, KeyModifiers::CONTROL, KeyCode::Char('k'))
+            | (_, KeyModifiers::CONTROL, KeyCode::Up) => {
                 self.model.update(Message::VolumeUp(5)).await;
             }
 
             // Other settings
-            (KeyModifiers::NONE, KeyCode::Char('i')) => {
+            (_, KeyModifiers::NONE, KeyCode::Char('i')) => {
                 self.model.update(Message::ToggleTrackArt).await;
             }
 
             // Playback controls
-            (_, KeyCode::Media(MediaKeyCode::PlayPause))
-            | (KeyModifiers::NONE, KeyCode::Char('p')) => {
+            (_, _, KeyCode::Media(MediaKeyCode::PlayPause))
+            | (_, KeyModifiers::NONE, KeyCode::Char('p')) => {
                 self.model.update(Message::PlayPause).await;
             }
-            (_, KeyCode::Media(MediaKeyCode::TrackPrevious))
-            | (KeyModifiers::NONE, KeyCode::Char('b')) => {
+            (_, _, KeyCode::Media(MediaKeyCode::TrackPrevious))
+            | (_, KeyModifiers::NONE, KeyCode::Char('b')) => {
                 self.model.update(Message::PrevTrack).await;
             }
-            (_, KeyCode::Media(MediaKeyCode::TrackNext))
-            | (KeyModifiers::NONE, KeyCode::Char('n')) => {
+            (_, _, KeyCode::Media(MediaKeyCode::TrackNext))
+            | (_, KeyModifiers::NONE, KeyCode::Char('n')) => {
                 self.model.update(Message::NextTrack).await;
             }
-            (KeyModifiers::NONE, KeyCode::Char('r')) => {
+            (_, KeyModifiers::NONE, KeyCode::Char('r')) => {
                 self.model.update(Message::CycleRepeatMode).await;
             }
-            (mods, KeyCode::Enter) => {
+            (RunningState::Library, mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.table_state.selected() {
                     let track = self
                         .model
