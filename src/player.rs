@@ -44,6 +44,8 @@ struct Theme {
     table_selected_row_fg: Color,
     progress_bar_unfilled: Color,
     progress_bar_filled: Color,
+    sidebar_now_playing_fg: Color,
+    sidebar_virtual_queue_fg: Color,
 }
 
 impl Default for Theme {
@@ -53,6 +55,8 @@ impl Default for Theme {
             table_selected_row_fg: Color::Black,
             progress_bar_unfilled: Color::White,
             progress_bar_filled: Color::Blue,
+            sidebar_now_playing_fg: Color::Blue,
+            sidebar_virtual_queue_fg: Color::Magenta,
         }
     }
 }
@@ -761,8 +765,10 @@ impl Player {
                 .iter()
                 .enumerate()
                 .map(|(index, track)| {
-                    let currently_playing =
-                        index == *model.playback_state.queue_index.lock().unwrap();
+                    let queue_index = model.playback_state.queue_index.lock().unwrap();
+                    let offset = model.playback_state.insertion_offset.lock().unwrap();
+                    let currently_playing = index == *queue_index;
+                    let in_temp_queue = index > *queue_index && index <= *queue_index + *offset;
                     let index = index + 1;
                     let index = if currently_playing {
                         format!("{index}*")
@@ -777,7 +783,9 @@ impl Player {
                     ]);
 
                     if currently_playing {
-                        row = row.fg(Color::Blue);
+                        row = row.fg(model.theme.sidebar_now_playing_fg);
+                    } else if in_temp_queue {
+                        row = row.fg(model.theme.sidebar_virtual_queue_fg);
                     }
 
                     row
