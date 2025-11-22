@@ -7,18 +7,11 @@ use minim::{Args, Player};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    color_eyre::install()?;
-    let mut terminal = ratatui::init();
     let args = Args::parse();
-    match Player::new(args).await {
-        Ok(mut player) => {
-            let result = player.run(&mut terminal).await;
-            ratatui::restore();
-            result.wrap_err("")
-        }
-        Err(e) => {
-            ratatui::restore();
-            Err(e)
-        }
-    }
+    let mut player = Player::new(args).await?;
+
+    let mut terminal = ratatui::init();
+    let result = player.run(&mut terminal).await;
+    ratatui::restore();
+    result.wrap_err("")
 }
