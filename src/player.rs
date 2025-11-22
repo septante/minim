@@ -728,6 +728,7 @@ impl Player {
             Constraint::Percentage(90),
             Constraint::Min(6),
         ];
+
         let table = Table::new(
             model
                 .playback_state
@@ -737,12 +738,26 @@ impl Player {
                 .iter()
                 .enumerate()
                 .map(|(index, track)| {
+                    let currently_playing =
+                        index == *model.playback_state.queue_index.lock().unwrap();
                     let index = index + 1;
-                    Row::new(vec![
-                        Text::from(format!("{index}")),
+                    let index = if currently_playing {
+                        format!("{index}*")
+                    } else {
+                        format!("{index}")
+                    };
+
+                    let mut row = Row::new(vec![
+                        Text::from(index),
                         Text::from(track.cached_field_string(CachedField::Title)),
                         Text::from(track.cached_field_string(CachedField::Duration)),
-                    ])
+                    ]);
+
+                    if currently_playing {
+                        row = row.fg(Color::Blue);
+                    }
+
+                    row
                 }),
             widths,
         );
