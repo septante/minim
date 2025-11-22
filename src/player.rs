@@ -81,7 +81,8 @@ enum Message {
     VolumeDown(usize),
     CycleRepeatMode,
     ToggleTrackArt,
-    SelectRow(usize),
+    SelectLibraryRow(usize),
+    SelectSidebarQueueRow(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,9 +134,10 @@ struct Model {
 
     // UI related state
     theme: Theme,
-    table_state: TableState,
+    library_table_state: TableState,
+    sidebar_table_state: TableState,
     image_state: Arc<Mutex<Option<StatefulProtocol>>>,
-    last_scroll: Instant,
+    last_library_scroll: Instant,
     needs_image_redraw: bool,
 
     // Resources
@@ -151,11 +153,21 @@ impl Model {
         match message {
             Message::Quit => self.running_state = RunningState::Quit,
             Message::ToggleHelp => self.show_help = !self.show_help,
-            Message::SelectRow(row) => self.select_row(row),
+            Message::SelectLibraryRow(row) => self.select_library_row(row),
+            Message::SelectSidebarQueueRow(row) => self.select_sidebar_row(row),
             Message::FocusLibrary => {
                 self.running_state = RunningState::Library;
             }
             Message::FocusSidebar => {
+                if self.playback_state.queue.lock().unwrap().is_empty() {
+                    return;
+                }
+
+                if self.sidebar_table_state.selected().is_none() {
+                    self.sidebar_table_state
+                        .select(Some(*self.playback_state.queue_index.lock().unwrap()));
+                }
+
                 self.running_state = RunningState::Sidebar;
             }
 
@@ -241,11 +253,15 @@ impl Model {
             .cloned()
     }
 
-    fn select_row(&mut self, row: usize) {
-        self.table_state.select(Some(row));
+    fn select_library_row(&mut self, row: usize) {
+        self.library_table_state.select(Some(row));
 
-        self.last_scroll = Instant::now();
+        self.last_library_scroll = Instant::now();
         self.needs_image_redraw = true;
+    }
+
+    fn select_sidebar_row(&mut self, row: usize) {
+        self.sidebar_table_state.select(Some(row));
     }
 
     /// Adds a [`Track`] to the queue. Does not add it to the [`Sink`]
@@ -368,9 +384,10 @@ impl Player {
             volume_percentage,
 
             theme: Theme::default(),
-            table_state: TableState::default().with_selected(0),
+            library_table_state: TableState::default().with_selected(0),
+            sidebar_table_state: TableState::default(),
             image_state: Arc::new(Mutex::new(None)),
-            last_scroll: Instant::now(),
+            last_library_scroll: Instant::now(),
             // Need to draw image for first track, but do it after initial render to reduce startup time
             needs_image_redraw: true,
 
@@ -452,8 +469,8 @@ impl Player {
     fn on_tick(&mut self) {
         if self.model.playback_state.settings.show_track_art
             && self.model.needs_image_redraw
-            && Instant::now() - self.model.last_scroll > Duration::from_millis(250)
-            && let Some(selection) = self.model.table_state.selected()
+            && Instant::now() - self.model.last_library_scroll > Duration::from_millis(250)
+            && let Some(selection) = self.model.library_table_state.selected()
             && let Some(track) = self.model.tracks.get(selection)
         {
             self.model.needs_image_redraw = false;
@@ -532,7 +549,7 @@ impl Player {
             // Library navigation
             (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('j'))
             | (RunningState::Library, KeyModifiers::NONE, KeyCode::Down) => {
-                let row = match self.model.table_state.selected() {
+                let row = match self.model.library_table_state.selected() {
                     Some(i) => {
                         if i >= self.model.tracks.len() - 1 {
                             0
@@ -543,11 +560,11 @@ impl Player {
                     None => 0,
                 };
 
-                self.model.update(Message::SelectRow(row)).await;
+                self.model.update(Message::SelectLibraryRow(row)).await;
             }
             (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('k'))
             | (RunningState::Library, KeyModifiers::NONE, KeyCode::Up) => {
-                let row = match self.model.table_state.selected() {
+                let row = match self.model.library_table_state.selected() {
                     Some(i) => {
                         if i == 0 {
                             self.model.tracks.len() - 1
@@ -558,14 +575,55 @@ impl Player {
                     None => 0,
                 };
 
-                self.model.update(Message::SelectRow(row)).await;
+                self.model.update(Message::SelectLibraryRow(row)).await;
             }
             (RunningState::Library, _, KeyCode::Home) => {
-                self.model.update(Message::SelectRow(0)).await;
+                self.model.update(Message::SelectLibraryRow(0)).await;
             }
             (RunningState::Library, _, KeyCode::End) => {
                 self.model
-                    .update(Message::SelectRow(self.model.tracks.len() - 1))
+                    .update(Message::SelectLibraryRow(self.model.tracks.len() - 1))
+                    .await;
+            }
+
+            // Sidebar queue navigation
+            (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Char('j'))
+            | (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Down) => {
+                let row = match self.model.sidebar_table_state.selected() {
+                    Some(i) => {
+                        if i >= self.model.playback_state.queue.lock().unwrap().len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSidebarQueueRow(row)).await;
+            }
+            (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Char('k'))
+            | (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Up) => {
+                let row = match self.model.sidebar_table_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.model.playback_state.queue.lock().unwrap().len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSidebarQueueRow(row)).await;
+            }
+            (RunningState::Sidebar, _, KeyCode::Home) => {
+                self.model.update(Message::SelectSidebarQueueRow(0)).await;
+            }
+            (RunningState::Sidebar, _, KeyCode::End) => {
+                let len = self.model.playback_state.queue.lock().unwrap().len();
+                self.model
+                    .update(Message::SelectSidebarQueueRow(len - 1))
                     .await;
             }
 
@@ -603,7 +661,7 @@ impl Player {
                 self.model.update(Message::CycleRepeatMode).await;
             }
             (RunningState::Library, mods, KeyCode::Enter) => {
-                if let Some(index) = self.model.table_state.selected() {
+                if let Some(index) = self.model.library_table_state.selected() {
                     let track = self
                         .model
                         .tracks
@@ -784,7 +842,7 @@ impl Player {
             .header(header)
             .row_highlight_style(selected_row_style);
 
-        frame.render_stateful_widget(table, area, &mut model.table_state);
+        frame.render_stateful_widget(table, area, &mut model.library_table_state);
     }
 
     fn render_sidebar(model: &mut Model, frame: &mut Frame, area: Rect) {
@@ -807,23 +865,38 @@ impl Player {
                     let offset = model.playback_state.insertion_offset.lock().unwrap();
                     let currently_playing = index == *queue_index;
                     let in_temp_queue = index > *queue_index && index <= *queue_index + *offset;
-                    let index = index + 1;
-                    let index = if currently_playing {
-                        format!("{index}*")
+                    let display_index = index + 1;
+                    let display_index = if currently_playing {
+                        format!("{display_index}*")
                     } else {
-                        format!("{index}")
+                        format!("{display_index}")
                     };
 
                     let mut row = Row::new(vec![
-                        Text::from(index),
+                        Text::from(display_index),
                         Text::from(track.cached_field_string(CachedField::Title)),
                         Text::from(track.cached_field_string(CachedField::Duration)),
                     ]);
 
-                    if currently_playing {
-                        row = row.fg(model.theme.sidebar_now_playing_fg);
-                    } else if in_temp_queue {
-                        row = row.fg(model.theme.sidebar_virtual_queue_fg);
+                    match model.running_state {
+                        RunningState::Sidebar => {
+                            if model.sidebar_table_state.selected() == Some(index) {
+                                row = row
+                                    .bg(model.theme.table_selected_row_bg_focused)
+                                    .fg(model.theme.table_selected_row_fg_focused);
+                            } else if currently_playing {
+                                row = row.fg(model.theme.sidebar_now_playing_fg);
+                            } else if in_temp_queue {
+                                row = row.fg(model.theme.sidebar_virtual_queue_fg);
+                            }
+                        }
+                        _ => {
+                            if currently_playing {
+                                row = row.fg(model.theme.sidebar_now_playing_fg);
+                            } else if in_temp_queue {
+                                row = row.fg(model.theme.sidebar_virtual_queue_fg);
+                            }
+                        }
                     }
 
                     row
@@ -837,7 +910,11 @@ impl Player {
                 &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
 
             let shapes = sidebar_layout.split(area);
-            frame.render_widget(table.block(block), shapes[0]);
+            frame.render_stateful_widget(
+                table.block(block),
+                shapes[0],
+                &mut model.sidebar_table_state,
+            );
 
             let image_widget = StatefulImage::default();
             let mut image_state = model.image_state.lock().unwrap();
@@ -851,7 +928,7 @@ impl Player {
             }
         } else {
             frame.render_widget(Clear, area);
-            frame.render_widget(table.block(block), area);
+            frame.render_stateful_widget(table.block(block), area, &mut model.sidebar_table_state);
         }
     }
 }
