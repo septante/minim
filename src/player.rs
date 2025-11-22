@@ -69,6 +69,7 @@ enum Message {
     VolumeUp(usize),
     VolumeDown(usize),
     CycleRepeatMode,
+    ToggleTrackArt,
     SelectRow(usize),
 }
 
@@ -78,21 +79,37 @@ enum RunningState {
     Library,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 enum RepeatMode {
+    #[default]
     Off,
     Queue,
     Single,
 }
 
+#[derive(Debug, Clone)]
+struct PlayerSettings {
+    repeat_mode: Arc<Mutex<RepeatMode>>,
+    show_track_art: bool,
+}
+
+impl Default for PlayerSettings {
+    fn default() -> Self {
+        Self {
+            repeat_mode: Default::default(),
+            show_track_art: true,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct PlaybackState {
+    settings: PlayerSettings,
     sink: Arc<Sink>,
     queue: Arc<Mutex<Vec<Track>>>,
     queue_index: Arc<Mutex<usize>>,
     /// Where to insert [`Track`]s when adding to middle of queue
     insertion_offset: Arc<Mutex<usize>>,
-    repeat_mode: Arc<Mutex<RepeatMode>>,
 }
 
 struct Model {
@@ -163,11 +180,15 @@ impl Model {
                     Self::play_track(&track, &self.playback_state.clone());
                 }
             }
+            Message::ToggleTrackArt => {
+                self.playback_state.settings.show_track_art =
+                    !self.playback_state.settings.show_track_art;
+            }
         }
     }
 
     fn cycle_repeat_mode(&mut self) {
-        let mut repeat_mode = self.playback_state.repeat_mode.lock().unwrap();
+        let mut repeat_mode = self.playback_state.settings.repeat_mode.lock().unwrap();
         *repeat_mode = match *repeat_mode {
             RepeatMode::Off => RepeatMode::Queue,
             RepeatMode::Queue => RepeatMode::Single,
@@ -225,7 +246,7 @@ impl Model {
             let on_track_end = move || {
                 let mut queue_index = playback_clone.queue_index.lock().unwrap();
                 let queue = playback_clone.queue.lock().unwrap();
-                match *playback_clone.repeat_mode.lock().unwrap() {
+                match *playback_clone.settings.repeat_mode.lock().unwrap() {
                     RepeatMode::Off => {
                         *queue_index += 1;
                     }
@@ -254,7 +275,7 @@ impl Model {
         self.playback_state.sink.stop();
         let mut queue_index = self.playback_state.queue_index.lock().unwrap();
         let queue = self.playback_state.queue.lock().unwrap();
-        match *self.playback_state.repeat_mode.lock().unwrap() {
+        match *self.playback_state.settings.repeat_mode.lock().unwrap() {
             // Note that the behavior here is different from if the track ends normally
             // If we are hitting next we should go to the next track even when repeat is set to single
             RepeatMode::Off | RepeatMode::Single => {
@@ -312,10 +333,10 @@ impl Player {
 
         let picker = Picker::from_query_stdio()?;
         let playback_state = PlaybackState {
+            settings: PlayerSettings::default(),
             queue: Arc::new(Mutex::new(Vec::new())),
             queue_index: Arc::new(Mutex::new(0)),
             insertion_offset: Arc::new(Mutex::new(0)),
-            repeat_mode: Arc::new(Mutex::new(RepeatMode::Off)),
             sink,
         };
 
@@ -409,7 +430,8 @@ impl Player {
     }
 
     fn on_tick(&mut self) {
-        if self.model.needs_image_redraw
+        if self.model.playback_state.settings.show_track_art
+            && self.model.needs_image_redraw
             && Instant::now() - self.model.last_scroll > Duration::from_millis(250)
             && let Some(selection) = self.model.table_state.selected()
             && let Some(track) = self.model.tracks.get(selection)
@@ -523,6 +545,11 @@ impl Player {
                 self.model.update(Message::VolumeUp(5)).await;
             }
 
+            // Other settings
+            (KeyModifiers::NONE, KeyCode::Char('i')) => {
+                self.model.update(Message::ToggleTrackArt).await;
+            }
+
             // Playback controls
             (_, KeyCode::Media(MediaKeyCode::PlayPause))
             | (KeyModifiers::NONE, KeyCode::Char('p')) => {
@@ -602,6 +629,7 @@ impl Player {
             ("Volume Up", "C-k"),
             ("Volume Down", "C-j"),
             ("Change Repeat Mode", "r"),
+            ("Toggle Track Art", "i"),
         ];
 
         let mut lines: Vec<Line> = binds
@@ -718,11 +746,6 @@ impl Player {
     }
 
     fn render_sidebar(model: &mut Model, frame: &mut Frame, area: Rect) {
-        let sidebar_layout =
-            &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
-
-        let shapes = sidebar_layout.split(area);
-
         let widths = [
             Constraint::Min(3),
             Constraint::Percentage(90),
@@ -762,17 +785,27 @@ impl Player {
             widths,
         );
         let block = Block::new().borders(Borders::all());
-        frame.render_widget(table.block(block), shapes[0]);
 
-        let image_widget = StatefulImage::default();
-        let mut image_state = model.image_state.lock().unwrap();
-        if image_state.is_none() {
-            let image = Self::placeholder_image();
-            let image = model.picker.new_resize_protocol(image);
-            *image_state = Some(image);
-        }
-        if let Some(ref mut image) = *image_state {
-            frame.render_stateful_widget(image_widget, shapes[1], image);
+        if model.playback_state.settings.show_track_art {
+            let sidebar_layout =
+                &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
+
+            let shapes = sidebar_layout.split(area);
+            frame.render_widget(table.block(block), shapes[0]);
+
+            let image_widget = StatefulImage::default();
+            let mut image_state = model.image_state.lock().unwrap();
+            if image_state.is_none() {
+                let image = Self::placeholder_image();
+                let image = model.picker.new_resize_protocol(image);
+                *image_state = Some(image);
+            }
+            if let Some(ref mut image) = *image_state {
+                frame.render_stateful_widget(image_widget, shapes[1], image);
+            }
+        } else {
+            frame.render_widget(Clear, area);
+            frame.render_widget(table.block(block), area);
         }
     }
 }
