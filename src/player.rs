@@ -77,6 +77,7 @@ enum Message {
     PrevTrack,
     QueueTrack(Track),
     QueueTrackNext(Track),
+    RemoveFromQueue(usize),
     VolumeUp(usize),
     VolumeDown(usize),
     CycleRepeatMode,
@@ -212,6 +213,9 @@ impl Model {
                     Self::play_track(&track, &self.playback_state.clone());
                 }
             }
+            Message::RemoveFromQueue(index) => {
+                self.remove_track(index);
+            }
             Message::ToggleTrackArt => {
                 self.playback_state.settings.show_track_art =
                     !self.playback_state.settings.show_track_art;
@@ -340,6 +344,22 @@ impl Model {
 
         let queue = self.playback_state.queue.lock().unwrap();
         Self::play_track(&queue.get(*index).unwrap().clone(), &self.playback_state);
+    }
+
+    /// Removes the track at the given index from the queue
+    fn remove_track(&mut self, index: usize) {
+        let queue_index = *self.playback_state.queue_index.lock().unwrap();
+        if index == queue_index {
+            self.next_track();
+        }
+
+        let mut queue = self.playback_state.queue.lock().unwrap();
+        let mut queue_index = self.playback_state.queue_index.lock().unwrap();
+        if index < *queue_index {
+            *queue_index -= 1;
+        }
+
+        queue.remove(index);
     }
 }
 
@@ -627,6 +647,12 @@ impl Player {
                     .await;
             }
 
+            (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Char('d')) => {
+                if let Some(index) = self.model.sidebar_table_state.selected() {
+                    self.model.update(Message::RemoveFromQueue(index)).await;
+                }
+            }
+
             // Volume controls
             (_, _, KeyCode::Media(MediaKeyCode::LowerVolume))
             | (_, KeyModifiers::CONTROL, KeyCode::Char('j'))
@@ -720,6 +746,9 @@ impl Player {
             ("Play/Pause", "p"),
             ("Next Track", "n"),
             ("Previous Track", "b"),
+            ("Switch Focus Left", "C-h"),
+            ("Switch Focus Right", "C-l"),
+            ("Remove from Queue", "d"),
             ("Volume Up", "C-k"),
             ("Volume Down", "C-j"),
             ("Change Repeat Mode", "r"),
