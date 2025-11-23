@@ -120,6 +120,7 @@ impl Default for PlayerSettings {
 }
 
 #[derive(Clone)]
+/// State that needs to be accessed from the callback when a track ends
 struct PlaybackState {
     settings: PlayerSettings,
     sink: Arc<Sink>,
@@ -455,6 +456,7 @@ impl Player {
         Ok(player)
     }
 
+    /// Read all tracks from the given [`Path`] and import their metadata into the player
     fn get_tracks_from_disk(path: &Path) -> Vec<Track> {
         let files = WalkDir::new(path)
             .into_iter()
@@ -464,6 +466,7 @@ impl Player {
         files.flat_map(|f| Track::try_from(f.path())).collect()
     }
 
+    /// Read library track data from cache, or from disk if cache isn't found.
     fn import_tracks(&mut self) {
         let mut path = dirs::cache_dir().expect("Missing cache dir?");
         path.push("minim");
