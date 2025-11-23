@@ -15,7 +15,10 @@ use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Clear, LineGauge, Paragraph, Row, Table, TableState},
+    widgets::{
+        Block, BorderType, Borders, Clear, LineGauge, Paragraph, Row, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Table, TableState,
+    },
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
@@ -136,7 +139,9 @@ struct Model {
     // UI related state
     theme: Theme,
     library_table_state: TableState,
+    library_scrollbar_state: ScrollbarState,
     sidebar_table_state: TableState,
+    sidebar_scrollbar_state: ScrollbarState,
     image_state: Arc<Mutex<Option<StatefulProtocol>>>,
     last_library_scroll: Instant,
     needs_image_redraw: bool,
@@ -201,13 +206,14 @@ impl Model {
             Message::QueueTrackNext(track) => {
                 let index = *self.playback_state.queue_index.lock().unwrap();
                 let mut offset = self.playback_state.insertion_offset.lock().unwrap();
-                self.playback_state
-                    .queue
-                    .lock()
-                    .unwrap()
-                    .insert(index + *offset + 1, track.clone());
-
                 *offset += 1;
+
+                let mut queue = self.playback_state.queue.lock().unwrap();
+
+                queue.insert(index + *offset, track.clone());
+
+                self.sidebar_scrollbar_state =
+                    self.sidebar_scrollbar_state.content_length(queue.len());
 
                 if self.playback_state.sink.empty() {
                     Self::play_track(&track, &self.playback_state.clone());
@@ -259,6 +265,7 @@ impl Model {
 
     fn select_library_row(&mut self, row: usize) {
         self.library_table_state.select(Some(row));
+        self.library_scrollbar_state = self.library_scrollbar_state.position(row);
 
         self.last_library_scroll = Instant::now();
         self.needs_image_redraw = true;
@@ -266,11 +273,14 @@ impl Model {
 
     fn select_sidebar_row(&mut self, row: usize) {
         self.sidebar_table_state.select(Some(row));
+        self.sidebar_scrollbar_state = self.sidebar_scrollbar_state.position(row);
     }
 
     /// Adds a [`Track`] to the queue. Does not add it to the [`Sink`]
     fn queue_track(&mut self, track: Track) {
-        self.playback_state.queue.lock().unwrap().push(track);
+        let mut queue = self.playback_state.queue.lock().unwrap();
+        queue.push(track);
+        self.sidebar_scrollbar_state = self.sidebar_scrollbar_state.content_length(queue.len());
     }
 
     /// Adds a [`Track`] to the [`Sink`] for playback
@@ -415,7 +425,9 @@ impl Player {
 
             theme: Theme::default(),
             library_table_state: TableState::default().with_selected(0),
+            library_scrollbar_state: ScrollbarState::new(0),
             sidebar_table_state: TableState::default(),
+            sidebar_scrollbar_state: ScrollbarState::new(0),
             image_state: Arc::new(Mutex::new(None)),
             last_library_scroll: Instant::now(),
             // Need to draw image for first track, but do it after initial render to reduce startup time
@@ -471,6 +483,11 @@ impl Player {
         };
 
         crate::cache::write_cache(&path, &self.model.tracks).unwrap();
+
+        self.model.library_scrollbar_state = self
+            .model
+            .library_scrollbar_state
+            .content_length(self.model.tracks.len());
     }
 
     /// Start the player
@@ -729,7 +746,7 @@ impl Player {
         let panel_splits = main_panel_layout.split(frame.area());
         let primary_tab = primary_tab_layout.split(panel_splits[0]);
 
-        Self::render_table(&mut self.model, frame, primary_tab[0]);
+        Self::render_library(&mut self.model, frame, primary_tab[0]);
         Self::render_sidebar(&mut self.model, frame, primary_tab[1]);
         Self::render_status_bar(&self.model, frame, panel_splits[1]);
 
@@ -842,7 +859,7 @@ impl Player {
         frame.render_widget(instructions, status_bar_layout[2]);
     }
 
-    fn render_table(model: &mut Model, frame: &mut Frame, area: Rect) {
+    fn render_library(model: &mut Model, frame: &mut Frame, area: Rect) {
         let selected_row_style = if model.running_state == RunningState::Library {
             Style::default()
                 .bg(model.theme.table_selected_row_bg_focused)
@@ -880,11 +897,46 @@ impl Player {
         let table = Table::new(rows, widths)
             .header(header)
             .row_highlight_style(selected_row_style);
+        let block = Block::new().borders(Borders::all());
 
-        frame.render_stateful_widget(table, area, &mut model.library_table_state);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+
+        frame.render_stateful_widget(table.block(block), area, &mut model.library_table_state);
+        frame.render_stateful_widget(
+            scrollbar,
+            area.inner(Margin {
+                horizontal: 0,
+                vertical: 1,
+            }),
+            &mut model.library_scrollbar_state,
+        );
     }
 
     fn render_sidebar(model: &mut Model, frame: &mut Frame, area: Rect) {
+        if model.playback_state.settings.show_track_art {
+            let sidebar_layout =
+                &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
+
+            let shapes = sidebar_layout.split(area);
+
+            Self::render_queue(model, frame, shapes[0]);
+
+            let image_widget = StatefulImage::default();
+            let mut image_state = model.image_state.lock().unwrap();
+            if image_state.is_none() {
+                let image = Self::placeholder_image();
+                let image = model.picker.new_resize_protocol(image);
+                *image_state = Some(image);
+            }
+            if let Some(ref mut image) = *image_state {
+                frame.render_stateful_widget(image_widget, shapes[1], image);
+            }
+        } else {
+            Self::render_queue(model, frame, area);
+        }
+    }
+
+    fn render_queue(model: &mut Model, frame: &mut Frame, area: Rect) {
         let widths = [
             Constraint::Min(3),
             Constraint::Percentage(90),
@@ -944,31 +996,17 @@ impl Player {
         );
         let block = Block::new().borders(Borders::all());
 
-        if model.playback_state.settings.show_track_art {
-            let sidebar_layout =
-                &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
 
-            let shapes = sidebar_layout.split(area);
-            frame.render_stateful_widget(
-                table.block(block),
-                shapes[0],
-                &mut model.sidebar_table_state,
-            );
-
-            let image_widget = StatefulImage::default();
-            let mut image_state = model.image_state.lock().unwrap();
-            if image_state.is_none() {
-                let image = Self::placeholder_image();
-                let image = model.picker.new_resize_protocol(image);
-                *image_state = Some(image);
-            }
-            if let Some(ref mut image) = *image_state {
-                frame.render_stateful_widget(image_widget, shapes[1], image);
-            }
-        } else {
-            frame.render_widget(Clear, area);
-            frame.render_stateful_widget(table.block(block), area, &mut model.sidebar_table_state);
-        }
+        frame.render_stateful_widget(table.block(block), area, &mut model.sidebar_table_state);
+        frame.render_stateful_widget(
+            scrollbar,
+            area.inner(Margin {
+                horizontal: 0,
+                vertical: 1,
+            }),
+            &mut model.sidebar_scrollbar_state,
+        );
     }
 }
 
