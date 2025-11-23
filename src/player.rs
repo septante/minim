@@ -16,8 +16,8 @@ use ratatui::{
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Borders, Clear, LineGauge, Paragraph, Row, Scrollbar,
-        ScrollbarOrientation, ScrollbarState, Table, TableState,
+        Block, BorderType, Clear, LineGauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table, TableState,
     },
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
@@ -798,9 +798,7 @@ impl Player {
 
         let text = Text::from(lines);
 
-        let block = Block::new()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded);
+        let block = Block::bordered().border_type(BorderType::Rounded);
         let widget = Paragraph::new(text).block(block);
 
         frame.render_widget(Clear, area);
@@ -897,7 +895,7 @@ impl Player {
         let table = Table::new(rows, widths)
             .header(header)
             .row_highlight_style(selected_row_style);
-        let block = Block::new().borders(Borders::all());
+        let block = Block::bordered();
 
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
 
@@ -997,7 +995,7 @@ impl Player {
                 }),
             widths,
         );
-        let block = Block::new().borders(Borders::all());
+        let block = Block::bordered();
 
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
 
