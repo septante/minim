@@ -328,6 +328,11 @@ impl Model {
                 }
             }
         }
+
+        if *queue_index > queue.len() {
+            *queue_index = queue.len();
+        }
+
         if let Some(track) = queue.get(*queue_index) {
             Self::play_track(track, &self.playback_state);
         }
@@ -337,13 +342,15 @@ impl Model {
     fn previous_track(&mut self) {
         self.playback_state.sink.stop();
 
-        let mut index = self.playback_state.queue_index.lock().unwrap();
-        if *index > 0 {
-            *index -= 1;
+        let mut queue_index = self.playback_state.queue_index.lock().unwrap();
+        if *queue_index > 0 {
+            *queue_index -= 1;
         }
 
         let queue = self.playback_state.queue.lock().unwrap();
-        Self::play_track(&queue.get(*index).unwrap().clone(), &self.playback_state);
+        if let Some(track) = queue.get(*queue_index) {
+            Self::play_track(track, &self.playback_state);
+        }
     }
 
     /// Removes the track at the given index from the queue
@@ -360,6 +367,9 @@ impl Model {
         }
 
         queue.remove(index);
+        if *queue_index > queue.len() {
+            *queue_index = queue.len();
+        }
     }
 }
 
