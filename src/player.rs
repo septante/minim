@@ -90,7 +90,7 @@ enum Message {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum RunningState {
+enum Focus {
     Quit,
     Library,
     Sidebar,
@@ -130,7 +130,7 @@ struct PlaybackState {
 }
 
 struct Model {
-    running_state: RunningState,
+    focus: Focus,
     show_help: bool,
     tracks: Vec<Track>,
     playback_state: PlaybackState,
@@ -157,12 +157,12 @@ impl Model {
     /// Handles incoming [`Message`]s
     async fn update(&mut self, message: Message) {
         match message {
-            Message::Quit => self.running_state = RunningState::Quit,
+            Message::Quit => self.focus = Focus::Quit,
             Message::ToggleHelp => self.show_help = !self.show_help,
             Message::SelectLibraryRow(row) => self.select_library_row(row),
             Message::SelectSidebarQueueRow(row) => self.select_sidebar_row(row),
             Message::FocusLibrary => {
-                self.running_state = RunningState::Library;
+                self.focus = Focus::Library;
             }
             Message::FocusSidebar => {
                 if self.playback_state.queue.lock().unwrap().is_empty() {
@@ -174,7 +174,7 @@ impl Model {
                         .select(Some(*self.playback_state.queue_index.lock().unwrap()));
                 }
 
-                self.running_state = RunningState::Sidebar;
+                self.focus = Focus::Sidebar;
             }
 
             // Playback controls
@@ -417,7 +417,7 @@ impl Player {
         };
 
         let model = Model {
-            running_state: RunningState::Library,
+            focus: Focus::Library,
             show_help: false,
             tracks: Vec::new(),
             playback_state,
@@ -507,7 +507,7 @@ impl Player {
                 last_tick = Instant::now();
             }
 
-            if self.model.running_state == RunningState::Quit {
+            if self.model.focus == Focus::Quit {
                 return Ok(());
             }
         }
@@ -566,11 +566,7 @@ impl Player {
     }
 
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match (
-            &self.model.running_state,
-            key_event.modifiers,
-            key_event.code,
-        ) {
+        match (&self.model.focus, key_event.modifiers, key_event.code) {
             (_, _, _) if self.model.show_help => {
                 self.model.update(Message::ToggleHelp).await;
             }
@@ -584,18 +580,18 @@ impl Player {
             }
 
             // Focus navigation
-            (RunningState::Library, KeyModifiers::CONTROL, KeyCode::Char('l'))
-            | (RunningState::Library, KeyModifiers::CONTROL, KeyCode::Right) => {
+            (Focus::Library, KeyModifiers::CONTROL, KeyCode::Char('l'))
+            | (Focus::Library, KeyModifiers::CONTROL, KeyCode::Right) => {
                 self.model.update(Message::FocusSidebar).await;
             }
-            (RunningState::Sidebar, KeyModifiers::CONTROL, KeyCode::Char('h'))
-            | (RunningState::Sidebar, KeyModifiers::CONTROL, KeyCode::Left) => {
+            (Focus::Sidebar, KeyModifiers::CONTROL, KeyCode::Char('h'))
+            | (Focus::Sidebar, KeyModifiers::CONTROL, KeyCode::Left) => {
                 self.model.update(Message::FocusLibrary).await;
             }
 
             // Library navigation
-            (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('j'))
-            | (RunningState::Library, KeyModifiers::NONE, KeyCode::Down) => {
+            (Focus::Library, KeyModifiers::NONE, KeyCode::Char('j'))
+            | (Focus::Library, KeyModifiers::NONE, KeyCode::Down) => {
                 let row = match self.model.library_table_state.selected() {
                     Some(i) => {
                         if i >= self.model.tracks.len() - 1 {
@@ -609,8 +605,8 @@ impl Player {
 
                 self.model.update(Message::SelectLibraryRow(row)).await;
             }
-            (RunningState::Library, KeyModifiers::NONE, KeyCode::Char('k'))
-            | (RunningState::Library, KeyModifiers::NONE, KeyCode::Up) => {
+            (Focus::Library, KeyModifiers::NONE, KeyCode::Char('k'))
+            | (Focus::Library, KeyModifiers::NONE, KeyCode::Up) => {
                 let row = match self.model.library_table_state.selected() {
                     Some(i) => {
                         if i == 0 {
@@ -624,18 +620,18 @@ impl Player {
 
                 self.model.update(Message::SelectLibraryRow(row)).await;
             }
-            (RunningState::Library, _, KeyCode::Home) => {
+            (Focus::Library, _, KeyCode::Home) => {
                 self.model.update(Message::SelectLibraryRow(0)).await;
             }
-            (RunningState::Library, _, KeyCode::End) => {
+            (Focus::Library, _, KeyCode::End) => {
                 self.model
                     .update(Message::SelectLibraryRow(self.model.tracks.len() - 1))
                     .await;
             }
 
             // Sidebar queue navigation
-            (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Char('j'))
-            | (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Down) => {
+            (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Char('j'))
+            | (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Down) => {
                 let row = match self.model.sidebar_table_state.selected() {
                     Some(i) => {
                         if i >= self.model.playback_state.queue.lock().unwrap().len() - 1 {
@@ -649,8 +645,8 @@ impl Player {
 
                 self.model.update(Message::SelectSidebarQueueRow(row)).await;
             }
-            (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Char('k'))
-            | (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Up) => {
+            (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Char('k'))
+            | (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Up) => {
                 let row = match self.model.sidebar_table_state.selected() {
                     Some(i) => {
                         if i == 0 {
@@ -664,17 +660,17 @@ impl Player {
 
                 self.model.update(Message::SelectSidebarQueueRow(row)).await;
             }
-            (RunningState::Sidebar, _, KeyCode::Home) => {
+            (Focus::Sidebar, _, KeyCode::Home) => {
                 self.model.update(Message::SelectSidebarQueueRow(0)).await;
             }
-            (RunningState::Sidebar, _, KeyCode::End) => {
+            (Focus::Sidebar, _, KeyCode::End) => {
                 let len = self.model.playback_state.queue.lock().unwrap().len();
                 self.model
                     .update(Message::SelectSidebarQueueRow(len - 1))
                     .await;
             }
 
-            (RunningState::Sidebar, KeyModifiers::NONE, KeyCode::Char('d')) => {
+            (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Char('d')) => {
                 if let Some(index) = self.model.sidebar_table_state.selected() {
                     self.model.update(Message::RemoveFromQueue(index)).await;
                 }
@@ -713,7 +709,7 @@ impl Player {
             (_, KeyModifiers::NONE, KeyCode::Char('r')) => {
                 self.model.update(Message::CycleRepeatMode).await;
             }
-            (RunningState::Library, mods, KeyCode::Enter) => {
+            (Focus::Library, mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.library_table_state.selected() {
                     let track = self
                         .model
@@ -858,7 +854,7 @@ impl Player {
     }
 
     fn render_library(model: &mut Model, frame: &mut Frame, area: Rect) {
-        let selected_row_style = if model.running_state == RunningState::Library {
+        let selected_row_style = if model.focus == Focus::Library {
             Style::default()
                 .bg(model.theme.table_selected_row_bg_focused)
                 .fg(model.theme.table_selected_row_fg_focused)
@@ -970,8 +966,8 @@ impl Player {
                         Text::from(track.cached_field_string(CachedField::Duration)),
                     ]);
 
-                    match model.running_state {
-                        RunningState::Sidebar => {
+                    match model.focus {
+                        Focus::Sidebar => {
                             if model.sidebar_table_state.selected() == Some(index) {
                                 row = row
                                     .bg(model.theme.table_selected_row_bg_focused)
