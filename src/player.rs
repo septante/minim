@@ -914,25 +914,28 @@ impl Player {
 
     fn render_sidebar(model: &mut Model, frame: &mut Frame, area: Rect) {
         if model.playback_state.settings.show_track_art {
-            let sidebar_layout =
+            let layout =
                 &Layout::vertical([Constraint::Percentage(100), Constraint::Min(area.width / 2)]);
 
-            let shapes = sidebar_layout.split(area);
+            let layout = layout.split(area);
 
-            Self::render_queue(model, frame, shapes[0]);
-
-            let image_widget = StatefulImage::default();
-            let mut image_state = model.image_state.lock().unwrap();
-            if image_state.is_none() {
-                let image = Self::placeholder_image();
-                let image = model.picker.new_resize_protocol(image);
-                *image_state = Some(image);
-            }
-            if let Some(ref mut image) = *image_state {
-                frame.render_stateful_widget(image_widget, shapes[1], image);
-            }
+            Self::render_queue(model, frame, layout[0]);
+            Self::render_track_art(model, frame, layout[1]);
         } else {
             Self::render_queue(model, frame, area);
+        }
+    }
+
+    fn render_track_art(model: &mut Model, frame: &mut Frame, area: Rect) {
+        let image_widget = StatefulImage::default();
+        let mut image_state = model.image_state.lock().unwrap();
+        if image_state.is_none() {
+            let image = Self::placeholder_image();
+            let image = model.picker.new_resize_protocol(image);
+            *image_state = Some(image);
+        }
+        if let Some(ref mut image) = *image_state {
+            frame.render_stateful_widget(image_widget, area, image);
         }
     }
 
