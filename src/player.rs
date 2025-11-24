@@ -130,6 +130,18 @@ struct PlaybackState {
     insertion_offset: Arc<Mutex<usize>>,
 }
 
+impl PlaybackState {
+    fn new(sink: Sink) -> Self {
+        Self {
+            settings: PlayerSettings::default(),
+            queue: Arc::new(Mutex::new(Vec::new())),
+            queue_index: Arc::new(Mutex::new(0)),
+            insertion_offset: Arc::new(Mutex::new(0)),
+            sink: Arc::new(sink),
+        }
+    }
+}
+
 struct Model {
     focus: Focus,
     show_help: bool,
@@ -155,6 +167,37 @@ struct Model {
 }
 
 impl Model {
+    fn new() -> Result<Self> {
+        let stream_handle = OutputStreamBuilder::open_default_stream()?;
+        let sink = rodio::Sink::connect_new(stream_handle.mixer());
+        let volume_percentage = 50;
+        sink.set_volume(volume_percentage as f32 / 100.0);
+
+        let picker = Picker::from_query_stdio()?;
+        let playback_state = PlaybackState::new(sink);
+
+        Ok(Self {
+            focus: Focus::Library,
+            show_help: false,
+            tracks: Vec::new(),
+            playback_state,
+            volume_percentage: 50,
+
+            theme: Theme::default(),
+            library_table_state: TableState::default().with_selected(0),
+            library_scrollbar_state: ScrollbarState::new(0),
+            sidebar_table_state: TableState::default(),
+            sidebar_scrollbar_state: ScrollbarState::new(0),
+            image_state: Arc::new(Mutex::new(None)),
+            last_library_scroll: Instant::now(),
+            // Need to draw image for first track, but do it after initial render to reduce startup time
+            needs_image_redraw: true,
+
+            picker,
+            _stream: stream_handle,
+        })
+    }
+
     /// Handles incoming [`Message`]s
     async fn update(&mut self, message: Message) {
         match message {
@@ -394,12 +437,6 @@ pub struct Player {
 impl Player {
     /// Create a new player instance
     pub async fn new(args: Args) -> Result<Self> {
-        let stream_handle = OutputStreamBuilder::open_default_stream()?;
-        let sink = rodio::Sink::connect_new(stream_handle.mixer());
-        let sink = Arc::new(sink);
-        let volume_percentage = 50;
-        sink.set_volume(volume_percentage as f32 / 100.0);
-
         let library_root = if let Some(ref dir) = args.dir {
             dir.to_owned()
         } else if let Some(dir) = dirs::audio_dir() {
@@ -408,35 +445,7 @@ impl Player {
             std::env::current_dir()?
         };
 
-        let picker = Picker::from_query_stdio()?;
-        let playback_state = PlaybackState {
-            settings: PlayerSettings::default(),
-            queue: Arc::new(Mutex::new(Vec::new())),
-            queue_index: Arc::new(Mutex::new(0)),
-            insertion_offset: Arc::new(Mutex::new(0)),
-            sink,
-        };
-
-        let model = Model {
-            focus: Focus::Library,
-            show_help: false,
-            tracks: Vec::new(),
-            playback_state,
-            volume_percentage,
-
-            theme: Theme::default(),
-            library_table_state: TableState::default().with_selected(0),
-            library_scrollbar_state: ScrollbarState::new(0),
-            sidebar_table_state: TableState::default(),
-            sidebar_scrollbar_state: ScrollbarState::new(0),
-            image_state: Arc::new(Mutex::new(None)),
-            last_library_scroll: Instant::now(),
-            // Need to draw image for first track, but do it after initial render to reduce startup time
-            needs_image_redraw: true,
-
-            picker,
-            _stream: stream_handle,
-        };
+        let model = Model::new()?;
 
         let mut player = Player {
             args,
