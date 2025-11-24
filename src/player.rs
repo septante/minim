@@ -10,6 +10,10 @@ use clap::Parser;
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode};
 use image::DynamicImage;
+use nucleo::{
+    Injector, Nucleo,
+    pattern::{CaseMatching, Normalization},
+};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Margin, Rect},
@@ -75,6 +79,8 @@ enum Message {
     FocusLibrary,
     FocusSidebar,
 
+    ShowSearchResults,
+
     PlayPause,
     NextTrack,
     PrevTrack,
@@ -86,6 +92,7 @@ enum Message {
     CycleRepeatMode,
     ToggleTrackArt,
     SelectLibraryRow(usize),
+    SelectSearchResultRow(usize),
     SelectSidebarQueueRow(usize),
 }
 
@@ -94,6 +101,8 @@ enum Focus {
     Quit,
     Library,
     Sidebar,
+    SearchInput,
+    SearchResults,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -142,6 +151,34 @@ impl PlaybackState {
     }
 }
 
+struct SearchState<T: Sync + Send + 'static> {
+    search_string: Option<String>,
+    matcher: Nucleo<T>,
+    injector: Injector<T>,
+    results: Vec<T>,
+}
+
+impl<T: Sync + Send + 'static> SearchState<T> {
+    fn new() -> Self {
+        let notify = Arc::new(Self::notify);
+        let mut matcher = Nucleo::new(nucleo::Config::DEFAULT, notify, None, 3);
+        matcher
+            .pattern
+            .reparse(0, "t", CaseMatching::Ignore, Normalization::Smart, false);
+        let injector = matcher.injector();
+        let results = Vec::new();
+
+        Self {
+            search_string: None,
+            matcher,
+            injector,
+            results,
+        }
+    }
+
+    fn notify() {}
+}
+
 struct Model {
     focus: Focus,
     show_help: bool,
@@ -153,11 +190,15 @@ struct Model {
     theme: Theme,
     library_table_state: TableState,
     library_scrollbar_state: ScrollbarState,
+    search_results_table_state: TableState,
+    search_results_scrollbar_state: ScrollbarState,
     sidebar_table_state: TableState,
     sidebar_scrollbar_state: ScrollbarState,
     image_state: Arc<Mutex<Option<StatefulProtocol>>>,
     last_library_scroll: Instant,
     needs_image_redraw: bool,
+
+    search_state: SearchState<Track>,
 
     // Resources
     picker: Picker,
@@ -175,6 +216,7 @@ impl Model {
 
         let picker = Picker::from_query_stdio()?;
         let playback_state = PlaybackState::new(sink);
+        let search_state = SearchState::new();
 
         Ok(Self {
             focus: Focus::Library,
@@ -186,12 +228,16 @@ impl Model {
             theme: Theme::default(),
             library_table_state: TableState::default().with_selected(0),
             library_scrollbar_state: ScrollbarState::new(0),
+            search_results_table_state: TableState::default().with_selected(0),
+            search_results_scrollbar_state: ScrollbarState::new(0),
             sidebar_table_state: TableState::default(),
             sidebar_scrollbar_state: ScrollbarState::new(0),
             image_state: Arc::new(Mutex::new(None)),
             last_library_scroll: Instant::now(),
             // Need to draw image for first track, but do it after initial render to reduce startup time
             needs_image_redraw: true,
+
+            search_state,
 
             picker,
             _stream: stream_handle,
@@ -204,6 +250,7 @@ impl Model {
             Message::Quit => self.focus = Focus::Quit,
             Message::ToggleHelp => self.show_help = !self.show_help,
             Message::SelectLibraryRow(row) => self.select_library_row(row),
+            Message::SelectSearchResultRow(row) => self.select_search_results_row(row),
             Message::SelectSidebarQueueRow(row) => self.select_sidebar_row(row),
             Message::FocusLibrary => {
                 self.focus = Focus::Library;
@@ -219,6 +266,11 @@ impl Model {
                 }
 
                 self.focus = Focus::Sidebar;
+            }
+
+            Message::ShowSearchResults => {
+                self.focus = Focus::SearchResults;
+                self.search_results_table_state.select(Some(0));
             }
 
             // Playback controls
@@ -313,6 +365,11 @@ impl Model {
 
         self.last_library_scroll = Instant::now();
         self.needs_image_redraw = true;
+    }
+
+    fn select_search_results_row(&mut self, row: usize) {
+        self.search_results_table_state.select(Some(row));
+        self.search_results_scrollbar_state = self.search_results_scrollbar_state.position(row);
     }
 
     fn select_sidebar_row(&mut self, row: usize) {
@@ -500,6 +557,17 @@ impl Player {
             .model
             .library_scrollbar_state
             .content_length(self.model.tracks.len());
+
+        for track in &self.model.tracks {
+            self.model
+                .search_state
+                .injector
+                .push(track.clone(), |track, utf32_strings| {
+                    utf32_strings[0] = track.cached_field_string(CachedField::Title).into();
+                    utf32_strings[1] = track.cached_field_string(CachedField::Artist).into();
+                    utf32_strings[2] = track.cached_field_string(CachedField::Album).into();
+                });
+        }
     }
 
     /// Start the player
@@ -526,6 +594,7 @@ impl Player {
     }
 
     fn on_tick(&mut self) {
+        // Update track art display
         if self.model.playback_state.settings.show_track_art
             && self.model.needs_image_redraw
             && Instant::now() - self.model.last_library_scroll > Duration::from_millis(250)
@@ -540,6 +609,12 @@ impl Player {
                 Self::update_track_art(&track, &picker, image_state).await;
             });
         }
+
+        // Update search results
+        self.model.search_state.matcher.tick(10);
+        let items = self.model.search_state.matcher.snapshot().matched_items(..);
+        let tracks = items.map(|item| item.data);
+        self.model.search_state.results = tracks.cloned().collect();
     }
 
     fn placeholder_image() -> DynamicImage {
@@ -596,8 +671,14 @@ impl Player {
             | (Focus::Library, KeyModifiers::CONTROL, KeyCode::Right) => {
                 self.model.update(Message::FocusSidebar).await;
             }
+            (Focus::Library, KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+                self.model.update(Message::ShowSearchResults).await;
+            }
             (Focus::Sidebar, KeyModifiers::CONTROL, KeyCode::Char('h'))
             | (Focus::Sidebar, KeyModifiers::CONTROL, KeyCode::Left) => {
+                self.model.update(Message::FocusLibrary).await;
+            }
+            (Focus::SearchResults, _, KeyCode::Esc) => {
                 self.model.update(Message::FocusLibrary).await;
             }
 
@@ -631,6 +712,36 @@ impl Player {
                 };
 
                 self.model.update(Message::SelectLibraryRow(row)).await;
+            }
+            (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Char('j'))
+            | (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Down) => {
+                let row = match self.model.search_results_table_state.selected() {
+                    Some(i) => {
+                        if i >= self.model.search_state.results.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSearchResultRow(row)).await;
+            }
+            (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Char('k'))
+            | (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Up) => {
+                let row = match self.model.search_results_table_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.model.search_state.results.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSearchResultRow(row)).await;
             }
             (Focus::Library, _, KeyCode::Home) => {
                 self.model.update(Message::SelectLibraryRow(0)).await;
@@ -878,15 +989,26 @@ impl Player {
         frame.render_widget(&spacer, gauge_layout[4]);
     }
 
+    fn track_to_row(track: &'_ Track) -> Row<'_> {
+        Row::new(vec![
+            Text::from(track.cached_field_string(CachedField::Title)),
+            Text::from(track.cached_field_string(CachedField::Artist)),
+            Text::from(format!(
+                "{} ",
+                track.cached_field_string(CachedField::Duration)
+            ))
+            .right_aligned(),
+        ])
+    }
+
     fn render_library(model: &mut Model, frame: &mut Frame, area: Rect) {
-        let selected_row_style = if model.focus == Focus::Library {
-            Style::default()
+        let selected_row_style = match model.focus {
+            Focus::Library | Focus::SearchResults => Style::default()
                 .bg(model.theme.table_selected_row_bg_focused)
-                .fg(model.theme.table_selected_row_fg_focused)
-        } else {
-            Style::default()
+                .fg(model.theme.table_selected_row_fg_focused),
+            _ => Style::default()
                 .bg(model.theme.table_selected_row_bg_unfocused)
-                .fg(model.theme.table_selected_row_fg_unfocused)
+                .fg(model.theme.table_selected_row_fg_unfocused),
         };
 
         let header = ["Title", "Artist", "Duration"]
@@ -895,17 +1017,18 @@ impl Player {
             .collect::<Row>()
             .bottom_margin(1);
 
-        let rows = model.tracks.iter().map(|track| {
-            Row::new(vec![
-                Text::from(track.cached_field_string(CachedField::Title)),
-                Text::from(track.cached_field_string(CachedField::Artist)),
-                Text::from(format!(
-                    "{} ",
-                    track.cached_field_string(CachedField::Duration)
-                ))
-                .right_aligned(),
-            ])
-        });
+        let (rows, table_state, scrollbar_state) = match model.focus {
+            Focus::SearchResults => (
+                model.search_state.results.iter().map(Self::track_to_row),
+                &mut model.search_results_table_state,
+                &mut model.search_results_scrollbar_state,
+            ),
+            _ => (
+                model.tracks.iter().map(Self::track_to_row),
+                &mut model.library_table_state,
+                &mut model.library_scrollbar_state,
+            ),
+        };
 
         let widths = [
             Constraint::Percentage(50),
@@ -918,16 +1041,16 @@ impl Player {
             .row_highlight_style(selected_row_style);
         let block = Block::bordered();
 
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        frame.render_stateful_widget(table.block(block), area, table_state);
 
-        frame.render_stateful_widget(table.block(block), area, &mut model.library_table_state);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
         frame.render_stateful_widget(
             scrollbar,
             area.inner(Margin {
                 horizontal: 0,
                 vertical: 1,
             }),
-            &mut model.library_scrollbar_state,
+            scrollbar_state,
         );
     }
 
