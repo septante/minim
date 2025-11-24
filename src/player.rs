@@ -815,6 +815,16 @@ impl Player {
 
     fn render_status_bar(model: &Model, frame: &mut Frame, area: Rect) {
         let layout = Layout::vertical([Constraint::Max(1), Constraint::Max(1), Constraint::Max(1)]);
+
+        let layout = layout.split(area);
+
+        Self::render_gauges(model, frame, layout[1]);
+
+        let instructions = Line::from("For help, press ?").centered();
+        frame.render_widget(instructions, layout[2]);
+    }
+
+    fn render_gauges(model: &Model, frame: &mut Frame, area: Rect) {
         let bars = Layout::horizontal([
             Constraint::Min(1),
             Constraint::Percentage(80),
@@ -822,9 +832,7 @@ impl Player {
             Constraint::Percentage(20),
             Constraint::Min(1),
         ]);
-
-        let status_bar_layout = layout.split(area);
-        let gauge_layout = bars.split(status_bar_layout[1]);
+        let gauge_layout = bars.split(area);
 
         let track = model.now_playing();
         let (label, ratio) = match track {
@@ -859,10 +867,6 @@ impl Player {
         frame.render_widget(&spacer, gauge_layout[2]);
         frame.render_widget(&volume_gauge, gauge_layout[3]);
         frame.render_widget(&spacer, gauge_layout[4]);
-
-        let instructions = Line::from("For help, press ?").centered();
-
-        frame.render_widget(instructions, status_bar_layout[2]);
     }
 
     fn render_library(model: &mut Model, frame: &mut Frame, area: Rect) {
