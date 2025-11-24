@@ -20,4 +20,5 @@ ratatui-image = "8.0.1"
 rodio = { version = "0.21" }
 serde = { version = "1.0.217", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
+tui-textarea = "0.7.0"
 walkdir = "2.5.0"

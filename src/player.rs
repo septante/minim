@@ -26,6 +26,7 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
 use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
+use tui_textarea::TextArea;
 use walkdir::WalkDir;
 
 use crate::track::{CachedField, Track};
@@ -78,7 +79,7 @@ enum Message {
     ToggleHelp,
     FocusLibrary,
     FocusSidebar,
-
+    FocusSearchBar,
     ShowSearchResults,
 
     PlayPause,
@@ -152,7 +153,6 @@ impl PlaybackState {
 }
 
 struct SearchState<T: Sync + Send + 'static> {
-    search_string: Option<String>,
     matcher: Nucleo<T>,
     injector: Injector<T>,
     results: Vec<T>,
@@ -160,26 +160,19 @@ struct SearchState<T: Sync + Send + 'static> {
 
 impl<T: Sync + Send + 'static> SearchState<T> {
     fn new() -> Self {
-        let notify = Arc::new(Self::notify);
-        let mut matcher = Nucleo::new(nucleo::Config::DEFAULT, notify, None, 3);
-        matcher
-            .pattern
-            .reparse(0, "t", CaseMatching::Ignore, Normalization::Smart, false);
+        let matcher = Nucleo::new(nucleo::Config::DEFAULT, Arc::new(|| {}), None, 3);
         let injector = matcher.injector();
         let results = Vec::new();
 
         Self {
-            search_string: None,
             matcher,
             injector,
             results,
         }
     }
-
-    fn notify() {}
 }
 
-struct Model {
+struct Model<'a> {
     focus: Focus,
     show_help: bool,
     tracks: Vec<Track>,
@@ -190,6 +183,7 @@ struct Model {
     theme: Theme,
     library_table_state: TableState,
     library_scrollbar_state: ScrollbarState,
+    search_bar: TextArea<'a>,
     search_results_table_state: TableState,
     search_results_scrollbar_state: ScrollbarState,
     sidebar_table_state: TableState,
@@ -207,7 +201,7 @@ struct Model {
     _stream: OutputStream,
 }
 
-impl Model {
+impl Model<'_> {
     fn new() -> Result<Self> {
         let stream_handle = OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
@@ -228,6 +222,7 @@ impl Model {
             theme: Theme::default(),
             library_table_state: TableState::default().with_selected(0),
             library_scrollbar_state: ScrollbarState::new(0),
+            search_bar: TextArea::default(),
             search_results_table_state: TableState::default().with_selected(0),
             search_results_scrollbar_state: ScrollbarState::new(0),
             sidebar_table_state: TableState::default(),
@@ -266,6 +261,21 @@ impl Model {
                 }
 
                 self.focus = Focus::Sidebar;
+            }
+            Message::FocusSearchBar => {
+                self.focus = Focus::SearchInput;
+                self.search_bar = TextArea::default();
+                self.search_state.results = Vec::new();
+                self.search_results_table_state = TableState::default().with_selected(0);
+                for column in 0..3 {
+                    self.search_state.matcher.pattern.reparse(
+                        column,
+                        "",
+                        CaseMatching::Ignore,
+                        Normalization::Smart,
+                        false,
+                    );
+                }
             }
 
             Message::ShowSearchResults => {
@@ -485,13 +495,13 @@ impl Model {
 }
 
 /// The player app
-pub struct Player {
+pub struct Player<'a> {
     args: Args,
     library_root: PathBuf,
-    model: Model,
+    model: Model<'a>,
 }
 
-impl Player {
+impl Player<'_> {
     /// Create a new player instance
     pub async fn new(args: Args) -> Result<Self> {
         let library_root = if let Some(ref dir) = args.dir {
@@ -641,10 +651,42 @@ impl Player {
     }
 
     async fn handle_events(&mut self) -> std::io::Result<()> {
-        match event::read()? {
+        match (&self.model.focus, event::read()?) {
+            (Focus::SearchInput, event) => match event {
+                Event::Key(key_event) if key_event.code == KeyCode::Esc => {
+                    self.model.update(Message::FocusLibrary).await;
+                }
+                Event::Key(key_event) if key_event.code == KeyCode::Enter => {
+                    self.model.update(Message::ShowSearchResults).await;
+                }
+                _ => {
+                    self.model.search_bar.input(event);
+                    self.model.search_state.matcher.pattern.reparse(
+                        0,
+                        self.model
+                            .search_bar
+                            .lines()
+                            .first()
+                            .expect("Can't be empty"),
+                        CaseMatching::Ignore,
+                        Normalization::Smart,
+                        false,
+                    );
+
+                    // Update results
+                    let items = self.model.search_state.matcher.snapshot().matched_items(..);
+                    let tracks = items.map(|item| item.data);
+                    self.model.search_state.results = tracks.cloned().collect();
+
+                    self.model.search_results_scrollbar_state = self
+                        .model
+                        .search_results_scrollbar_state
+                        .content_length(self.model.search_state.results.len());
+                }
+            },
             // it's important to check that the event is a key press event as
             // crossterm also emits key release and repeat events on Windows.
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+            (_, Event::Key(key_event)) if key_event.kind == KeyEventKind::Press => {
                 self.handle_key_event(key_event).await;
             }
             _ => {}
@@ -670,6 +712,10 @@ impl Player {
             (Focus::Library, KeyModifiers::CONTROL, KeyCode::Char('l'))
             | (Focus::Library, KeyModifiers::CONTROL, KeyCode::Right) => {
                 self.model.update(Message::FocusSidebar).await;
+            }
+            (Focus::Library, KeyModifiers::NONE, KeyCode::Char('/'))
+            | (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Char('/')) => {
+                self.model.update(Message::FocusSearchBar).await;
             }
             (Focus::Library, KeyModifiers::CONTROL, KeyCode::Char('s')) => {
                 self.model.update(Message::ShowSearchResults).await;
@@ -749,6 +795,17 @@ impl Player {
             (Focus::Library, _, KeyCode::End) => {
                 self.model
                     .update(Message::SelectLibraryRow(self.model.tracks.len() - 1))
+                    .await;
+            }
+
+            (Focus::SearchResults, _, KeyCode::Home) => {
+                self.model.update(Message::SelectSearchResultRow(0)).await;
+            }
+            (Focus::SearchResults, _, KeyCode::End) => {
+                self.model
+                    .update(Message::SelectSearchResultRow(
+                        self.model.search_state.results.len() - 1,
+                    ))
                     .await;
             }
 
@@ -852,6 +909,27 @@ impl Player {
                     }
                 }
             }
+            (Focus::SearchResults, mods, KeyCode::Enter) => {
+                if let Some(index) = self.model.search_results_table_state.selected() {
+                    let track = self
+                        .model
+                        .search_state
+                        .results
+                        .get(index)
+                        .expect("Should be valid index")
+                        .clone();
+
+                    match mods {
+                        KeyModifiers::ALT => {
+                            self.model.update(Message::QueueTrackNext(track)).await;
+                        }
+
+                        _ => {
+                            self.model.update(Message::QueueTrack(track)).await;
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -940,7 +1018,11 @@ impl Player {
 
     #[cfg(debug_assertions)]
     fn render_debug_info(model: &Model, frame: &mut Frame, area: Rect) {
-        let text = Line::from(format!("Focus: {:?}", model.focus));
+        let text = Line::from(format!(
+            "Focus: {:?}, Search: {:?}",
+            model.focus,
+            model.search_bar.lines().first().unwrap()
+        ));
         frame.render_widget(text, area);
     }
 
@@ -1003,7 +1085,7 @@ impl Player {
 
     fn render_library(model: &mut Model, frame: &mut Frame, area: Rect) {
         let selected_row_style = match model.focus {
-            Focus::Library | Focus::SearchResults => Style::default()
+            Focus::Library | Focus::SearchInput | Focus::SearchResults => Style::default()
                 .bg(model.theme.table_selected_row_bg_focused)
                 .fg(model.theme.table_selected_row_fg_focused),
             _ => Style::default()
@@ -1018,7 +1100,7 @@ impl Player {
             .bottom_margin(1);
 
         let (rows, table_state, scrollbar_state) = match model.focus {
-            Focus::SearchResults => (
+            Focus::SearchInput | Focus::SearchResults => (
                 model.search_state.results.iter().map(Self::track_to_row),
                 &mut model.search_results_table_state,
                 &mut model.search_results_scrollbar_state,
