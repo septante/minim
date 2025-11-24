@@ -818,10 +818,19 @@ impl Player {
 
         let layout = layout.split(area);
 
+        #[cfg(debug_assertions)]
+        Self::render_debug_info(model, frame, layout[0]);
+
         Self::render_gauges(model, frame, layout[1]);
 
         let instructions = Line::from("For help, press ?").centered();
         frame.render_widget(instructions, layout[2]);
+    }
+
+    #[cfg(debug_assertions)]
+    fn render_debug_info(model: &Model, frame: &mut Frame, area: Rect) {
+        let text = Line::from(format!("Focus: {:?}", model.focus));
+        frame.render_widget(text, area);
     }
 
     fn render_gauges(model: &Model, frame: &mut Frame, area: Rect) {
