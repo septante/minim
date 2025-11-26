@@ -970,6 +970,7 @@ impl Player<'_> {
             ("Play/Pause", "p"),
             ("Next Track", "n"),
             ("Previous Track", "b"),
+            ("Search", "/"),
             ("Switch Focus Left", "C-h"),
             ("Switch Focus Right", "C-l"),
             ("Remove from Queue", "d"),
