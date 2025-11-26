@@ -695,17 +695,24 @@ impl Player<'_> {
                 }
                 _ => {
                     self.model.search_bar.input(event);
-                    self.model.search_state.matcher.pattern.reparse(
-                        0,
-                        self.model
-                            .search_bar
-                            .lines()
-                            .first()
-                            .expect("Can't be empty"),
-                        CaseMatching::Ignore,
-                        Normalization::Smart,
-                        false,
-                    );
+
+                    // Update matcher. Note that this is NOT compatible with the upstream `nucleo`
+                    // library behavior, and instead relies on a fork that OR's matches together
+                    // See https://github.com/helix-editor/nucleo/issues/23#issuecomment-2643833781
+                    // and https://github.com/helix-editor/nucleo/pull/53 for details
+                    for column in 0..3 {
+                        self.model.search_state.matcher.pattern.reparse(
+                            column,
+                            self.model
+                                .search_bar
+                                .lines()
+                                .first()
+                                .expect("Can't be empty"),
+                            CaseMatching::Ignore,
+                            Normalization::Smart,
+                            false,
+                        );
+                    }
 
                     // Update results
                     let items = self.model.search_state.matcher.snapshot().matched_items(..);
