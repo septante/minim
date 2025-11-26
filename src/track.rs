@@ -95,8 +95,8 @@ impl Track {
     pub(crate) fn cached_field_string(&self, field: CachedField) -> String {
         match field {
             CachedField::Title => {
-                if let Some(title) = self.title.clone() {
-                    title
+                if let Some(title) = &self.title {
+                    title.clone()
                 } else {
                     self.path
                         .file_name()
