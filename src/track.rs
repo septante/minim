@@ -175,7 +175,15 @@ impl Track {
     pub fn compare_by_fields(a: &Self, b: &Self, fields: &[CachedField]) -> Ordering {
         fields.iter().fold(Ordering::Equal, |prev, &field| {
             prev.then_with(|| match field {
-                CachedField::Title => Self::case_insensitive_cmp(&a.title, &b.title),
+                CachedField::Title => match (&a.title, &b.title) {
+                    (Some(_), Some(_)) => Self::case_insensitive_cmp(&a.title, &b.title),
+                    (Some(_), None) => Ordering::Greater,
+                    (None, Some(_)) => Ordering::Less,
+                    (None, None) => Self::case_insensitive_cmp(
+                        &Some(a.cached_field_string(CachedField::Title)),
+                        &Some(b.cached_field_string(CachedField::Title)),
+                    ),
+                },
                 CachedField::Artist => Self::case_insensitive_cmp(&a.artist, &b.artist),
                 CachedField::Album => Self::case_insensitive_cmp(&a.album, &b.album),
                 // CachedField::Year => todo!(),
