@@ -55,10 +55,10 @@ impl TryFrom<ItemKey> for CachedField {
     }
 }
 
-impl TryFrom<CachedField> for ItemKey {
+impl TryFrom<&CachedField> for ItemKey {
     type Error = color_eyre::Report;
 
-    fn try_from(field: CachedField) -> std::result::Result<Self, Self::Error> {
+    fn try_from(field: &CachedField) -> std::result::Result<Self, Self::Error> {
         match field {
             CachedField::Title => Ok(ItemKey::TrackTitle),
             CachedField::Artist => Ok(ItemKey::TrackArtist),
@@ -92,7 +92,7 @@ impl Track {
         format!("{mins}:{:0>2}", secs)
     }
 
-    pub(crate) fn cached_field_string(&self, field: CachedField) -> String {
+    pub(crate) fn cached_field_string(&self, field: &CachedField) -> String {
         match field {
             CachedField::Title => {
                 if let Some(title) = &self.title {
@@ -180,8 +180,8 @@ impl Track {
                     (Some(_), None) => Ordering::Greater,
                     (None, Some(_)) => Ordering::Less,
                     (None, None) => Self::case_insensitive_cmp(
-                        &Some(a.cached_field_string(CachedField::Title)),
-                        &Some(b.cached_field_string(CachedField::Title)),
+                        &Some(a.cached_field_string(&CachedField::Title)),
+                        &Some(b.cached_field_string(&CachedField::Title)),
                     ),
                 },
                 CachedField::Artist => Self::case_insensitive_cmp(&a.artist, &b.artist),

@@ -1123,11 +1123,11 @@ impl Player<'_> {
 
     fn track_to_row(track: &'_ Track) -> Row<'_> {
         Row::new(vec![
-            Text::from(track.cached_field_string(CachedField::Title)),
-            Text::from(track.cached_field_string(CachedField::Artist)),
+            Text::from(track.cached_field_string(&CachedField::Title)),
+            Text::from(track.cached_field_string(&CachedField::Artist)),
             Text::from(format!(
                 "{} ",
-                track.cached_field_string(CachedField::Duration)
+                track.cached_field_string(&CachedField::Duration)
             ))
             .right_aligned(),
         ])
@@ -1242,8 +1242,8 @@ impl Player<'_> {
 
                     let mut row = Row::new(vec![
                         Text::from(display_index),
-                        Text::from(track.cached_field_string(CachedField::Title)),
-                        Text::from(track.cached_field_string(CachedField::Duration)),
+                        Text::from(track.cached_field_string(&CachedField::Title)),
+                        Text::from(track.cached_field_string(&CachedField::Duration)),
                     ]);
 
                     match model.focus {
