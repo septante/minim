@@ -155,18 +155,26 @@ impl PlaybackState {
 struct SearchState<T: Sync + Send + 'static> {
     matcher: Nucleo<T>,
     injector: Injector<T>,
+    columns_to_search: Vec<CachedField>,
     results: Vec<T>,
 }
 
 impl<T: Sync + Send + 'static> SearchState<T> {
     fn new() -> Self {
-        let matcher = Nucleo::new(nucleo::Config::DEFAULT, Arc::new(|| {}), None, 3);
+        let columns_to_search = vec![CachedField::Title, CachedField::Artist, CachedField::Album];
+        let matcher = Nucleo::new(
+            nucleo::Config::DEFAULT,
+            Arc::new(|| {}),
+            None,
+            columns_to_search.len().try_into().unwrap(),
+        );
         let injector = matcher.injector();
         let results = Vec::new();
 
         Self {
             matcher,
             injector,
+            columns_to_search,
             results,
         }
     }
@@ -270,7 +278,7 @@ impl Model<'_> {
                 self.search_state.results = Vec::new();
                 self.search_results_table_state = TableState::default().with_selected(0);
                 self.search_results_scrollbar_state = ScrollbarState::new(self.tracks.len());
-                for column in 0..3 {
+                for column in 0..self.search_state.columns_to_search.len() {
                     self.search_state.matcher.pattern.reparse(
                         column,
                         "",
@@ -700,7 +708,7 @@ impl Player<'_> {
                     // library behavior, and instead relies on a fork that OR's matches together
                     // See https://github.com/helix-editor/nucleo/issues/23#issuecomment-2643833781
                     // and https://github.com/helix-editor/nucleo/pull/53 for details
-                    for column in 0..3 {
+                    for column in 0..self.model.search_state.columns_to_search.len() {
                         self.model.search_state.matcher.pattern.reparse(
                             column,
                             self.model
