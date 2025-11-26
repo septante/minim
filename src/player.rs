@@ -189,7 +189,7 @@ struct Model<'a> {
     sidebar_table_state: TableState,
     sidebar_scrollbar_state: ScrollbarState,
     image_state: Arc<Mutex<Option<StatefulProtocol>>>,
-    last_library_scroll: Instant,
+    last_track_focus_update: Instant,
     needs_image_redraw: bool,
 
     search_state: SearchState<Track>,
@@ -228,7 +228,7 @@ impl Model<'_> {
             sidebar_table_state: TableState::default(),
             sidebar_scrollbar_state: ScrollbarState::new(0),
             image_state: Arc::new(Mutex::new(None)),
-            last_library_scroll: Instant::now(),
+            last_track_focus_update: Instant::now(),
             // Need to draw image for first track, but do it after initial render to reduce startup time
             needs_image_redraw: true,
 
@@ -249,6 +249,7 @@ impl Model<'_> {
             Message::SelectSidebarQueueRow(row) => self.select_sidebar_row(row),
             Message::FocusLibrary => {
                 self.focus = Focus::Library;
+                self.request_image_redraw();
             }
             Message::FocusSidebar => {
                 if self.playback_state.queue.lock().unwrap().is_empty() {
@@ -261,12 +262,14 @@ impl Model<'_> {
                 }
 
                 self.focus = Focus::Sidebar;
+                self.request_image_redraw();
             }
             Message::FocusSearchBar => {
                 self.focus = Focus::SearchInput;
                 self.search_bar = TextArea::default();
                 self.search_state.results = Vec::new();
                 self.search_results_table_state = TableState::default().with_selected(0);
+                self.search_results_scrollbar_state = ScrollbarState::new(self.tracks.len());
                 for column in 0..3 {
                     self.search_state.matcher.pattern.reparse(
                         column,
@@ -281,6 +284,7 @@ impl Model<'_> {
             Message::ShowSearchResults => {
                 self.focus = Focus::SearchResults;
                 self.search_results_table_state.select(Some(0));
+                self.request_image_redraw();
             }
 
             // Playback controls
@@ -335,6 +339,14 @@ impl Model<'_> {
         }
     }
 
+    /// Signal that the track art display needs to be updated
+    ///
+    /// The player has an internal cooldown to only redraw after it detects scrolling has stopped
+    fn request_image_redraw(&mut self) {
+        self.last_track_focus_update = Instant::now();
+        self.needs_image_redraw = true;
+    }
+
     fn cycle_repeat_mode(&mut self) {
         let mut repeat_mode = self.playback_state.settings.repeat_mode.lock().unwrap();
         *repeat_mode = match *repeat_mode {
@@ -373,18 +385,21 @@ impl Model<'_> {
         self.library_table_state.select(Some(row));
         self.library_scrollbar_state = self.library_scrollbar_state.position(row);
 
-        self.last_library_scroll = Instant::now();
-        self.needs_image_redraw = true;
+        self.request_image_redraw();
     }
 
     fn select_search_results_row(&mut self, row: usize) {
         self.search_results_table_state.select(Some(row));
         self.search_results_scrollbar_state = self.search_results_scrollbar_state.position(row);
+
+        self.request_image_redraw();
     }
 
     fn select_sidebar_row(&mut self, row: usize) {
         self.sidebar_table_state.select(Some(row));
         self.sidebar_scrollbar_state = self.sidebar_scrollbar_state.position(row);
+
+        self.request_image_redraw();
     }
 
     /// Adds a [`Track`] to the queue. Does not add it to the [`Sink`]
@@ -604,27 +619,46 @@ impl Player<'_> {
     }
 
     fn on_tick(&mut self) {
-        // Update track art display
-        if self.model.playback_state.settings.show_track_art
-            && self.model.needs_image_redraw
-            && Instant::now() - self.model.last_library_scroll > Duration::from_millis(250)
-            && let Some(selection) = self.model.library_table_state.selected()
-            && let Some(track) = self.model.tracks.get(selection)
-        {
-            self.model.needs_image_redraw = false;
-            let image_state = self.model.image_state.clone();
-            let track = track.clone();
-            let picker = self.model.picker.clone();
-            tokio::spawn(async move {
-                Self::update_track_art(&track, &picker, image_state).await;
-            });
-        }
-
         // Update search results
         self.model.search_state.matcher.tick(10);
         let items = self.model.search_state.matcher.snapshot().matched_items(..);
         let tracks = items.map(|item| item.data);
         self.model.search_state.results = tracks.cloned().collect();
+
+        // Update track art display
+        if self.model.playback_state.settings.show_track_art
+            && self.model.needs_image_redraw
+            && Instant::now() - self.model.last_track_focus_update > Duration::from_millis(250)
+            && let Some(track) = match self.model.focus {
+                Focus::Library => match self.model.library_table_state.selected() {
+                    Some(index) => self.model.tracks.get(index).cloned(),
+                    None => None,
+                },
+                Focus::SearchResults => match self.model.search_results_table_state.selected() {
+                    Some(index) => self.model.search_state.results.get(index).cloned(),
+                    None => panic!(),
+                },
+                Focus::Sidebar => match self.model.sidebar_table_state.selected() {
+                    Some(index) => self
+                        .model
+                        .playback_state
+                        .queue
+                        .lock()
+                        .unwrap()
+                        .get(index)
+                        .cloned(),
+                    None => None,
+                },
+                _ => None,
+            }
+        {
+            self.model.needs_image_redraw = false;
+            let image_state = self.model.image_state.clone();
+            let picker = self.model.picker.clone();
+            tokio::spawn(async move {
+                Self::update_track_art(&track, &picker, image_state).await;
+            });
+        }
     }
 
     fn placeholder_image() -> DynamicImage {
