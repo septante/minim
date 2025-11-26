@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use anyhow::Result;
+use color_eyre::Result;
 
 use crate::Track;
 
