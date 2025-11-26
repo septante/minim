@@ -596,9 +596,11 @@ impl Player<'_> {
                 .search_state
                 .injector
                 .push(track.clone(), |track, utf32_strings| {
-                    utf32_strings[0] = track.cached_field_string(CachedField::Title).into();
-                    utf32_strings[1] = track.cached_field_string(CachedField::Artist).into();
-                    utf32_strings[2] = track.cached_field_string(CachedField::Album).into();
+                    for (index, column) in
+                        self.model.search_state.columns_to_search.iter().enumerate()
+                    {
+                        utf32_strings[index] = track.cached_field_string(column).into();
+                    }
                 });
         }
     }
