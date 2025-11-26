@@ -59,7 +59,7 @@
         {
           default = rustPlatform.buildRustPackage {
             pname = "minim";
-            src = ./.;
+            src = lib.cleanSource ./.;
             inherit version;
 
             cargoLock = {
