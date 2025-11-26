@@ -17,7 +17,7 @@ use nucleo::{
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Margin, Rect},
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Clear, LineGauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
@@ -29,7 +29,10 @@ use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
 use tui_textarea::TextArea;
 use walkdir::WalkDir;
 
-use crate::track::{CachedField, Track};
+use crate::{
+    theme::Theme,
+    track::{CachedField, Track},
+};
 
 const PLACEHOLDER_IMAGE_BYTES: &[u8] = include_bytes!("../placeholder.png");
 
@@ -43,34 +46,6 @@ pub struct Args {
     /// Reset library cache
     #[arg(short = 'c', long = "clean")]
     reset_cache: bool,
-}
-
-#[non_exhaustive]
-/// Theme data for the player UI
-struct Theme {
-    table_selected_row_bg_focused: Color,
-    table_selected_row_fg_focused: Color,
-    table_selected_row_bg_unfocused: Color,
-    table_selected_row_fg_unfocused: Color,
-    progress_bar_unfilled: Color,
-    progress_bar_filled: Color,
-    sidebar_now_playing_fg: Color,
-    sidebar_virtual_queue_fg: Color,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            table_selected_row_bg_focused: Color::Blue,
-            table_selected_row_fg_focused: Color::Black,
-            table_selected_row_bg_unfocused: Color::Gray,
-            table_selected_row_fg_unfocused: Color::Black,
-            progress_bar_unfilled: Color::White,
-            progress_bar_filled: Color::Blue,
-            sidebar_now_playing_fg: Color::Blue,
-            sidebar_virtual_queue_fg: Color::Magenta,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -2,6 +2,7 @@
 
 mod cache;
 mod player;
+mod theme;
 /// Types related to tracks
 pub mod track;
 
