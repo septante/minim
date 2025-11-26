@@ -1,0 +1,8 @@
+table_selected_row_bg_focused = "blue"
+table_selected_row_fg_focused = "black"
+table_selected_row_bg_unfocused = "gray"
+table_selected_row_fg_unfocused = "black"
+progress_bar_unfilled = "white"
+progress_bar_filled = "blue"
+sidebar_now_playing_fg = "blue"
+sidebar_virtual_queue_fg = "magenta"
