@@ -997,6 +997,10 @@ impl Player<'_> {
             (_, KeyCode::Esc) => {
                 self.model.update(Message::FocusLibrary).await;
             }
+            (KeyModifiers::CONTROL, KeyCode::Char('l'))
+            | (KeyModifiers::CONTROL, KeyCode::Right) => {
+                self.model.update(Message::FocusSidebar).await;
+            }
 
             (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
                 let row = match self.model.search_results_table_state.selected() {
@@ -1256,8 +1260,10 @@ impl Player<'_> {
             .header(header)
             .row_highlight_style(selected_row_style);
         let mut block = Block::bordered();
-        if model.player_state.main_panel_view == MainPanelView::Library
-            || model.player_state.main_panel_view == MainPanelView::SearchResults
+
+        if model.player_state.focus == PanelFocus::MainPanel
+            && (model.player_state.main_panel_view == MainPanelView::Library
+                || model.player_state.main_panel_view == MainPanelView::SearchResults)
         {
             block = block.border_style(model.theme.focused_panel_border);
         }
