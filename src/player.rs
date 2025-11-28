@@ -227,7 +227,7 @@ impl Model<'_> {
     fn from_config(config: &Config) -> Result<Self> {
         let mut model = Self::new()?;
         model.theme = Theme::get_theme_by_name(&config.theme)
-            .unwrap_or_else(|_| panic!("Couldn't find theme: {}", config.theme));
+            .unwrap_or_else(|_| panic!("Error while loading theme '{}'", config.theme));
 
         model.playback_state.settings.show_track_art = config.show_track_art;
 
@@ -981,12 +981,12 @@ impl Player<'_> {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        let main_panel_layout =
+            &Layout::vertical([Constraint::Percentage(100), Constraint::Length(2)]);
+        let panel_splits = main_panel_layout.split(frame.area());
+
         let primary_tab_layout =
             &Layout::horizontal([Constraint::Percentage(80), Constraint::Min(15)]);
-        let main_panel_layout =
-            &Layout::vertical([Constraint::Percentage(100), Constraint::Min(10)]);
-
-        let panel_splits = main_panel_layout.split(frame.area());
         let primary_tab = primary_tab_layout.split(panel_splits[0]);
 
         Self::render_library(&mut self.model, frame, primary_tab[0]);
@@ -1050,17 +1050,18 @@ impl Player<'_> {
     }
 
     fn render_status_bar(model: &Model, frame: &mut Frame, area: Rect) {
-        let layout = Layout::vertical([Constraint::Max(1), Constraint::Max(1), Constraint::Max(1)]);
-
+        let layout = Layout::vertical([Constraint::Min(1), Constraint::Min(1)]);
         let layout = layout.split(area);
 
-        #[cfg(debug_assertions)]
-        Self::render_debug_info(model, frame, layout[0]);
+        Self::render_gauges(model, frame, layout[0]);
 
-        Self::render_gauges(model, frame, layout[1]);
-
-        let instructions = Line::from("For help, press ?").centered();
-        frame.render_widget(instructions, layout[2]);
+        if cfg!(debug_assertions) {
+            #[cfg(debug_assertions)]
+            Self::render_debug_info(model, frame, layout[1]);
+        } else {
+            let instructions = Line::from("For help, press ?").centered();
+            frame.render_widget(instructions, layout[1]);
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -1181,6 +1182,29 @@ impl Player<'_> {
             }),
             scrollbar_state,
         );
+
+        match model.focus {
+            Focus::SearchInput | Focus::SearchResults => {
+                let area = area.inner(Margin {
+                    horizontal: 1,
+                    vertical: 1,
+                });
+                let layout = Layout::vertical([Constraint::Percentage(100), Constraint::Length(3)]);
+                let layout = layout.split(area);
+                let area = layout[1];
+
+                let mut block = Block::bordered().title("Search");
+                if model.focus == Focus::SearchInput {
+                    block = block.border_style(model.theme.focused_panel_border);
+                }
+
+                model.search_bar.set_block(block);
+                frame.render_widget(Clear, area);
+                frame.render_widget(&model.search_bar, area);
+            }
+
+            _ => {}
+        };
     }
 
     fn render_sidebar(model: &mut Model, frame: &mut Frame, area: Rect) {
@@ -1212,7 +1236,7 @@ impl Player<'_> {
 
     fn render_queue(model: &mut Model, frame: &mut Frame, area: Rect) {
         let widths = [
-            Constraint::Min(3),
+            Constraint::Length(3),
             Constraint::Percentage(90),
             Constraint::Min(6),
         ];

@@ -1,3 +1,4 @@
+focused_panel_border = "blue"
 table_selected_row_bg_focused = "blue"
 table_selected_row_fg_focused = "black"
 table_selected_row_bg_unfocused = "gray"

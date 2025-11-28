@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 /// Theme data for the player UI
 pub struct Theme {
+    pub focused_panel_border: Color,
     pub table_selected_row_bg_focused: Color,
     pub table_selected_row_fg_focused: Color,
     pub table_selected_row_bg_unfocused: Color,
@@ -48,6 +49,7 @@ impl FromStr for Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
+            focused_panel_border: Color::Blue,
             table_selected_row_bg_focused: Color::Blue,
             table_selected_row_fg_focused: Color::Black,
             table_selected_row_bg_unfocused: Color::Gray,
