@@ -1169,7 +1169,10 @@ impl Player<'_> {
         let table = Table::new(rows, widths)
             .header(header)
             .row_highlight_style(selected_row_style);
-        let block = Block::bordered();
+        let mut block = Block::bordered();
+        if model.focus == Focus::Library || model.focus == Focus::SearchResults {
+            block = block.border_style(model.theme.focused_panel_border);
+        }
 
         frame.render_stateful_widget(table.block(block), area, table_state);
 
@@ -1292,19 +1295,20 @@ impl Player<'_> {
                 }),
             widths,
         );
-        let block = Block::bordered();
 
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut block = Block::bordered();
+        if model.focus == Focus::Sidebar {
+            block = block.border_style(model.theme.focused_panel_border);
+        }
 
         frame.render_stateful_widget(table.block(block), area, &mut model.sidebar_table_state);
-        frame.render_stateful_widget(
-            scrollbar,
-            area.inner(Margin {
-                horizontal: 0,
-                vertical: 1,
-            }),
-            &mut model.sidebar_scrollbar_state,
-        );
+
+        let area = area.inner(Margin {
+            horizontal: 0,
+            vertical: 1,
+        });
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        frame.render_stateful_widget(scrollbar, area, &mut model.sidebar_scrollbar_state);
     }
 }
 
