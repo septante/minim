@@ -54,8 +54,9 @@ pub struct Args {
 enum Message {
     Quit,
     ToggleHelp,
-    FocusLibrary,
+    FocusMainPanel,
     FocusSidebar,
+    FocusLibrary,
     FocusSearchBar,
     ShowSearchResults,
 
@@ -75,10 +76,33 @@ enum Message {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Focus {
-    Quit,
-    Library,
+struct PlayerState {
+    quit: bool,
+    show_help: bool,
+    focus: PanelFocus,
+    main_panel_view: MainPanelView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PanelFocus {
+    MainPanel,
     Sidebar,
+}
+
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self {
+            quit: false,
+            show_help: false,
+            focus: PanelFocus::MainPanel,
+            main_panel_view: MainPanelView::Library,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MainPanelView {
+    Library,
     SearchInput,
     SearchResults,
 }
@@ -158,8 +182,7 @@ impl<T: Sync + Send + 'static> SearchState<T> {
 }
 
 struct Model<'a> {
-    focus: Focus,
-    show_help: bool,
+    player_state: PlayerState,
     tracks: Vec<Track>,
     playback_state: PlaybackState,
     volume_percentage: usize,
@@ -198,8 +221,7 @@ impl Model<'_> {
         let search_state = SearchState::new();
 
         Ok(Self {
-            focus: Focus::Library,
-            show_help: false,
+            player_state: PlayerState::default(),
             tracks: Vec::new(),
             playback_state,
             volume_percentage: 50,
@@ -237,15 +259,16 @@ impl Model<'_> {
     /// Handles incoming [`Message`]s
     async fn update(&mut self, message: Message) {
         match message {
-            Message::Quit => self.focus = Focus::Quit,
-            Message::ToggleHelp => self.show_help = !self.show_help,
+            Message::Quit => self.player_state.quit = true,
+            Message::ToggleHelp => self.player_state.show_help = !self.player_state.show_help,
             Message::SelectLibraryRow(row) => self.select_library_row(row),
             Message::SelectSearchResultRow(row) => self.select_search_results_row(row),
             Message::SelectSidebarQueueRow(row) => self.select_sidebar_row(row),
             Message::FocusLibrary => {
-                self.focus = Focus::Library;
+                self.player_state.main_panel_view = MainPanelView::Library;
                 self.request_image_redraw();
             }
+            Message::FocusMainPanel => self.player_state.focus = PanelFocus::MainPanel,
             Message::FocusSidebar => {
                 if self.playback_state.queue.lock().unwrap().is_empty() {
                     return;
@@ -256,11 +279,11 @@ impl Model<'_> {
                         .select(Some(*self.playback_state.queue_index.lock().unwrap()));
                 }
 
-                self.focus = Focus::Sidebar;
+                self.player_state.focus = PanelFocus::Sidebar;
                 self.request_image_redraw();
             }
             Message::FocusSearchBar => {
-                self.focus = Focus::SearchInput;
+                self.player_state.main_panel_view = MainPanelView::SearchInput;
                 self.search_bar = TextArea::default();
                 self.search_state.results = Vec::new();
                 self.search_results_table_state = TableState::default().with_selected(0);
@@ -277,7 +300,7 @@ impl Model<'_> {
             }
 
             Message::ShowSearchResults => {
-                self.focus = Focus::SearchResults;
+                self.player_state.main_panel_view = MainPanelView::SearchResults;
                 self.search_results_table_state.select(Some(0));
                 self.request_image_redraw();
             }
@@ -617,7 +640,7 @@ impl Player<'_> {
                 last_tick = Instant::now();
             }
 
-            if self.model.focus == Focus::Quit {
+            if self.model.player_state.quit {
                 return Ok(());
             }
         }
@@ -634,16 +657,11 @@ impl Player<'_> {
         if self.model.playback_state.settings.show_track_art
             && self.model.needs_image_redraw
             && Instant::now() - self.model.last_track_focus_update > Duration::from_millis(250)
-            && let Some(track) = match self.model.focus {
-                Focus::Library => match self.model.library_table_state.selected() {
-                    Some(index) => self.model.tracks.get(index).cloned(),
-                    None => None,
-                },
-                Focus::SearchResults => match self.model.search_results_table_state.selected() {
-                    Some(index) => self.model.search_state.results.get(index).cloned(),
-                    None => panic!(),
-                },
-                Focus::Sidebar => match self.model.sidebar_table_state.selected() {
+            && let Some(track) = match self.model.player_state {
+                PlayerState {
+                    focus: PanelFocus::Sidebar,
+                    ..
+                } => match self.model.sidebar_table_state.selected() {
                     Some(index) => self
                         .model
                         .playback_state
@@ -653,6 +671,20 @@ impl Player<'_> {
                         .get(index)
                         .cloned(),
                     None => None,
+                },
+                PlayerState {
+                    main_panel_view: MainPanelView::Library,
+                    ..
+                } => match self.model.library_table_state.selected() {
+                    Some(index) => self.model.tracks.get(index).cloned(),
+                    None => None,
+                },
+                PlayerState {
+                    main_panel_view: MainPanelView::SearchResults,
+                    ..
+                } => match self.model.search_results_table_state.selected() {
+                    Some(index) => self.model.search_state.results.get(index).cloned(),
+                    None => panic!(),
                 },
                 _ => None,
             }
@@ -690,7 +722,7 @@ impl Player<'_> {
     }
 
     async fn handle_events(&mut self) -> std::io::Result<()> {
-        match (&self.model.focus, event::read()?) {
+        match (&self.model.player_state, event::read()?) {
             // it's important to check that the event is a key press event as
             // crossterm also emits key release and repeat events on Windows.
             (_, Event::Key(key_event)) if key_event.kind == KeyEventKind::Press => {
@@ -702,10 +734,21 @@ impl Player<'_> {
     }
 
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match (&self.model.focus, key_event.modifiers, key_event.code) {
-            (Focus::SearchInput, _, _) => self.handle_search_input_event(key_event).await,
+        match (
+            &self.model.player_state,
+            key_event.modifiers,
+            key_event.code,
+        ) {
+            (
+                PlayerState {
+                    main_panel_view: MainPanelView::SearchInput,
+                    ..
+                },
+                _,
+                _,
+            ) => self.handle_search_input_event(key_event).await,
 
-            (_, _, _) if self.model.show_help => {
+            (_, _, _) if self.model.player_state.show_help => {
                 self.model.update(Message::ToggleHelp).await;
             }
 
@@ -751,11 +794,30 @@ impl Player<'_> {
                 self.model.update(Message::CycleRepeatMode).await;
             }
 
-            (Focus::Sidebar, _, _) => self.handle_sidebar_event(key_event).await,
-            (Focus::Library, _, _) => self.handle_library_event(key_event).await,
-            (Focus::SearchResults, _, _) => self.handle_search_results_event(key_event).await,
-
-            _ => {}
+            (
+                PlayerState {
+                    focus: PanelFocus::Sidebar,
+                    ..
+                },
+                _,
+                _,
+            ) => self.handle_sidebar_event(key_event).await,
+            (
+                PlayerState {
+                    main_panel_view: MainPanelView::Library,
+                    ..
+                },
+                _,
+                _,
+            ) => self.handle_library_event(key_event).await,
+            (
+                PlayerState {
+                    main_panel_view: MainPanelView::SearchResults,
+                    ..
+                },
+                _,
+                _,
+            ) => self.handle_search_results_event(key_event).await,
         }
     }
 
@@ -763,7 +825,7 @@ impl Player<'_> {
         match (key_event.modifiers, key_event.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('h'))
             | (KeyModifiers::CONTROL, KeyCode::Left) => {
-                self.model.update(Message::FocusLibrary).await;
+                self.model.update(Message::FocusMainPanel).await;
             }
 
             // Sidebar queue navigation
@@ -1017,7 +1079,7 @@ impl Player<'_> {
         Self::render_sidebar(&mut self.model, frame, primary_tab[1]);
         Self::render_status_bar(&self.model, frame, panel_splits[1]);
 
-        if self.model.show_help {
+        if self.model.player_state.show_help {
             Self::render_help(&self.model, frame);
         }
     }
@@ -1092,7 +1154,7 @@ impl Player<'_> {
     fn render_debug_info(model: &Model, frame: &mut Frame, area: Rect) {
         let text = Line::from(format!(
             "Focus: {:?}, Search: {:?}",
-            model.focus,
+            model.player_state,
             model.search_bar.lines().first().unwrap()
         ));
         frame.render_widget(text, area);
@@ -1156,8 +1218,8 @@ impl Player<'_> {
     }
 
     fn render_library(model: &mut Model, frame: &mut Frame, area: Rect) {
-        let selected_row_style = match model.focus {
-            Focus::Library | Focus::SearchInput | Focus::SearchResults => Style::default()
+        let selected_row_style = match model.player_state.focus {
+            PanelFocus::MainPanel => Style::default()
                 .bg(model.theme.table_selected_row_bg_focused)
                 .fg(model.theme.table_selected_row_fg_focused),
             _ => Style::default()
@@ -1171,8 +1233,8 @@ impl Player<'_> {
             .collect::<Row>()
             .bottom_margin(1);
 
-        let (rows, table_state, scrollbar_state) = match model.focus {
-            Focus::SearchInput | Focus::SearchResults => (
+        let (rows, table_state, scrollbar_state) = match model.player_state.main_panel_view {
+            MainPanelView::SearchInput | MainPanelView::SearchResults => (
                 model.search_state.results.iter().map(Self::track_to_row),
                 &mut model.search_results_table_state,
                 &mut model.search_results_scrollbar_state,
@@ -1194,7 +1256,9 @@ impl Player<'_> {
             .header(header)
             .row_highlight_style(selected_row_style);
         let mut block = Block::bordered();
-        if model.focus == Focus::Library || model.focus == Focus::SearchResults {
+        if model.player_state.main_panel_view == MainPanelView::Library
+            || model.player_state.main_panel_view == MainPanelView::SearchResults
+        {
             block = block.border_style(model.theme.focused_panel_border);
         }
 
@@ -1210,8 +1274,8 @@ impl Player<'_> {
             scrollbar_state,
         );
 
-        match model.focus {
-            Focus::SearchInput | Focus::SearchResults => {
+        match model.player_state.main_panel_view {
+            MainPanelView::SearchInput | MainPanelView::SearchResults => {
                 let area = area.inner(Margin {
                     horizontal: 1,
                     vertical: 1,
@@ -1221,7 +1285,7 @@ impl Player<'_> {
                 let area = layout[1];
 
                 let mut block = Block::bordered().title("Search");
-                if model.focus == Focus::SearchInput {
+                if model.player_state.main_panel_view == MainPanelView::SearchInput {
                     block = block.border_style(model.theme.focused_panel_border);
                 }
 
@@ -1294,8 +1358,8 @@ impl Player<'_> {
                         Text::from(track.cached_field_string(&CachedField::Duration)),
                     ]);
 
-                    match model.focus {
-                        Focus::Sidebar => {
+                    match model.player_state.focus {
+                        PanelFocus::Sidebar => {
                             if model.sidebar_table_state.selected() == Some(index) {
                                 row = row
                                     .bg(model.theme.table_selected_row_bg_focused)
@@ -1321,7 +1385,7 @@ impl Player<'_> {
         );
 
         let mut block = Block::bordered();
-        if model.focus == Focus::Sidebar {
+        if model.player_state.focus == PanelFocus::Sidebar {
             block = block.border_style(model.theme.focused_panel_border);
         }
 
