@@ -224,6 +224,14 @@ impl Model<'_> {
         })
     }
 
+    fn from_config(config: &Config) -> Result<Self> {
+        let mut model = Self::new()?;
+        model.theme = Theme::get_theme_by_name(&config.theme)
+            .unwrap_or_else(|_| panic!("Couldn't find theme: {}", config.theme));
+
+        Ok(model)
+    }
+
     /// Handles incoming [`Message`]s
     async fn update(&mut self, message: Message) {
         match message {
@@ -521,13 +529,11 @@ impl Player<'_> {
 
             Config {
                 library_root,
-                theme: "default".to_owned(),
+                ..Default::default()
             }
         };
 
-        let mut model = Model::new()?;
-        model.theme = Theme::get_theme_by_name(&config.theme)
-            .unwrap_or_else(|_| panic!("Couldn't find theme: {}", config.theme));
+        let model = Model::from_config(&config)?;
 
         let mut player = Player {
             args,
