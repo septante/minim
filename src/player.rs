@@ -1164,6 +1164,8 @@ impl Player<'_> {
         let bars = Layout::horizontal([
             Constraint::Min(1),
             Constraint::Percentage(80),
+            Constraint::Min(2),
+            Constraint::Length(2),
             Constraint::Min(1),
             Constraint::Percentage(20),
             Constraint::Min(1),
@@ -1198,11 +1200,20 @@ impl Player<'_> {
             .ratio(model.volume_percentage as f64 / 100.0)
             .label(format!("{}%", model.volume_percentage));
 
+        let repeat_character = match *model.playback_state.settings.repeat_mode.lock().unwrap() {
+            RepeatMode::Off => "\u{2192}",
+            RepeatMode::Queue => "\u{2b8c}",
+            RepeatMode::Single => "\u{27f2}",
+        };
+        let repeat_mode_indicator = Line::raw(repeat_character);
+
         frame.render_widget(&spacer, gauge_layout[0]);
         frame.render_widget(&progress_bar, gauge_layout[1]);
         frame.render_widget(&spacer, gauge_layout[2]);
-        frame.render_widget(&volume_gauge, gauge_layout[3]);
+        frame.render_widget(&repeat_mode_indicator, gauge_layout[3]);
         frame.render_widget(&spacer, gauge_layout[4]);
+        frame.render_widget(&volume_gauge, gauge_layout[5]);
+        frame.render_widget(&spacer, gauge_layout[6]);
     }
 
     fn track_to_row(track: &'_ Track) -> Row<'_> {
