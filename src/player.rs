@@ -1156,11 +1156,7 @@ impl Player<'_> {
 
     #[cfg(debug_assertions)]
     fn render_debug_info(model: &Model, frame: &mut Frame, area: Rect) {
-        let text = Line::from(format!(
-            "Focus: {:?}, Search: {:?}",
-            model.player_state,
-            model.search_bar.lines().first().unwrap()
-        ));
+        let text = Line::from(format!("Focus: {:?}", model.player_state));
         frame.render_widget(text, area);
     }
 
