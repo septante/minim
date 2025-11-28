@@ -461,6 +461,7 @@ impl Model<'_> {
 
             let source = WrappedSource::new(decoder, on_track_end);
             playback_state.sink.append(source);
+            playback_state.sink.play();
         }
     }
 
