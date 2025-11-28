@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod cache;
+mod config;
+mod paths;
 mod player;
 mod theme;
 /// Types related to tracks

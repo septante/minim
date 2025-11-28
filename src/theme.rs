@@ -20,10 +20,8 @@ pub struct Theme {
 
 impl Theme {
     pub fn get_theme_by_name(name: &str) -> Result<Self> {
-        let mut path = dirs::config_dir().ok_or(eyre!("Couldn't find config dir"))?;
-        path.push("minim");
-
-        path.push(name);
+        let mut path = crate::paths::theme_dir().ok_or(eyre!("Couldn't find config dir"))?;
+        path.push(format!("{}.toml", name));
 
         Self::load_from_file(path)
     }

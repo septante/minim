@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use color_eyre::Result;
+use color_eyre::{Result, eyre::eyre};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode};
 use image::DynamicImage;
 use nucleo::{
@@ -30,6 +30,8 @@ use tui_textarea::TextArea;
 use walkdir::WalkDir;
 
 use crate::{
+    config::Config,
+    paths,
     theme::Theme,
     track::{CachedField, Track},
 };
@@ -495,26 +497,41 @@ impl Model<'_> {
 /// The player app
 pub struct Player<'a> {
     args: Args,
-    library_root: PathBuf,
+    config: Config,
     model: Model<'a>,
 }
 
 impl Player<'_> {
     /// Create a new player instance
     pub async fn new(args: Args) -> Result<Self> {
-        let library_root = if let Some(ref dir) = args.dir {
-            dir.to_owned()
-        } else if let Some(dir) = dirs::audio_dir() {
-            dir
+        paths::create_config_files()?;
+
+        let config = if let Ok(path) = crate::paths::config_file().ok_or(eyre!(""))
+            && let Ok(config) = Config::load_from_file(&path)
+        {
+            config
         } else {
-            std::env::current_dir()?
+            let library_root = if let Some(ref dir) = args.dir {
+                dir.to_owned()
+            } else if let Some(dir) = dirs::audio_dir() {
+                dir
+            } else {
+                std::env::current_dir()?
+            };
+
+            Config {
+                library_root,
+                theme: "default".to_owned(),
+            }
         };
 
-        let model = Model::new()?;
+        let mut model = Model::new()?;
+        model.theme = Theme::get_theme_by_name(&config.theme)
+            .unwrap_or_else(|_| panic!("Couldn't find theme: {}", config.theme));
 
         let mut player = Player {
             args,
-            library_root,
+            config,
             model,
         };
 
@@ -544,11 +561,6 @@ impl Player<'_> {
     fn import_tracks(&mut self) {
         let mut path = dirs::cache_dir().expect("Missing cache dir?");
         path.push("minim");
-        if let Ok(exists) = fs::exists(&path)
-            && !exists
-        {
-            fs::create_dir(&path).unwrap();
-        }
         path.push("library.csv");
 
         self.model.tracks = if !self.args.reset_cache
@@ -556,7 +568,7 @@ impl Player<'_> {
         {
             tracks
         } else {
-            Self::get_tracks_from_disk(&self.library_root)
+            Self::get_tracks_from_disk(&self.config.library_root)
         };
 
         crate::cache::write_cache(&path, &self.model.tracks).unwrap();
