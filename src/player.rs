@@ -754,154 +754,6 @@ impl Player<'_> {
                 self.model.update(Message::ToggleHelp).await;
             }
 
-            // Focus navigation
-            (Focus::Library, KeyModifiers::CONTROL, KeyCode::Char('l'))
-            | (Focus::Library, KeyModifiers::CONTROL, KeyCode::Right) => {
-                self.model.update(Message::FocusSidebar).await;
-            }
-            (Focus::Library, KeyModifiers::NONE, KeyCode::Char('/'))
-            | (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Char('/')) => {
-                self.model.update(Message::FocusSearchBar).await;
-            }
-            (Focus::Library, KeyModifiers::CONTROL, KeyCode::Char('s')) => {
-                self.model.update(Message::ShowSearchResults).await;
-            }
-            (Focus::Sidebar, KeyModifiers::CONTROL, KeyCode::Char('h'))
-            | (Focus::Sidebar, KeyModifiers::CONTROL, KeyCode::Left) => {
-                self.model.update(Message::FocusLibrary).await;
-            }
-            (Focus::SearchResults, _, KeyCode::Esc) => {
-                self.model.update(Message::FocusLibrary).await;
-            }
-
-            // Library navigation
-            (Focus::Library, KeyModifiers::NONE, KeyCode::Char('j'))
-            | (Focus::Library, KeyModifiers::NONE, KeyCode::Down) => {
-                let row = match self.model.library_table_state.selected() {
-                    Some(i) => {
-                        if i >= self.model.tracks.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-
-                self.model.update(Message::SelectLibraryRow(row)).await;
-            }
-            (Focus::Library, KeyModifiers::NONE, KeyCode::Char('k'))
-            | (Focus::Library, KeyModifiers::NONE, KeyCode::Up) => {
-                let row = match self.model.library_table_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.model.tracks.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-
-                self.model.update(Message::SelectLibraryRow(row)).await;
-            }
-            (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Char('j'))
-            | (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Down) => {
-                let row = match self.model.search_results_table_state.selected() {
-                    Some(i) => {
-                        if i >= self.model.search_state.results.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-
-                self.model.update(Message::SelectSearchResultRow(row)).await;
-            }
-            (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Char('k'))
-            | (Focus::SearchResults, KeyModifiers::NONE, KeyCode::Up) => {
-                let row = match self.model.search_results_table_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.model.search_state.results.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-
-                self.model.update(Message::SelectSearchResultRow(row)).await;
-            }
-            (Focus::Library, _, KeyCode::Home) => {
-                self.model.update(Message::SelectLibraryRow(0)).await;
-            }
-            (Focus::Library, _, KeyCode::End) => {
-                self.model
-                    .update(Message::SelectLibraryRow(self.model.tracks.len() - 1))
-                    .await;
-            }
-
-            (Focus::SearchResults, _, KeyCode::Home) => {
-                self.model.update(Message::SelectSearchResultRow(0)).await;
-            }
-            (Focus::SearchResults, _, KeyCode::End) => {
-                self.model
-                    .update(Message::SelectSearchResultRow(
-                        self.model.search_state.results.len() - 1,
-                    ))
-                    .await;
-            }
-
-            // Sidebar queue navigation
-            (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Char('j'))
-            | (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Down) => {
-                let row = match self.model.sidebar_table_state.selected() {
-                    Some(i) => {
-                        if i >= self.model.playback_state.queue.lock().unwrap().len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-
-                self.model.update(Message::SelectSidebarQueueRow(row)).await;
-            }
-            (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Char('k'))
-            | (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Up) => {
-                let row = match self.model.sidebar_table_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            self.model.playback_state.queue.lock().unwrap().len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-
-                self.model.update(Message::SelectSidebarQueueRow(row)).await;
-            }
-            (Focus::Sidebar, _, KeyCode::Home) => {
-                self.model.update(Message::SelectSidebarQueueRow(0)).await;
-            }
-            (Focus::Sidebar, _, KeyCode::End) => {
-                let len = self.model.playback_state.queue.lock().unwrap().len();
-                self.model
-                    .update(Message::SelectSidebarQueueRow(len - 1))
-                    .await;
-            }
-
-            (Focus::Sidebar, KeyModifiers::NONE, KeyCode::Char('d')) => {
-                if let Some(index) = self.model.sidebar_table_state.selected() {
-                    self.model.update(Message::RemoveFromQueue(index)).await;
-                }
-            }
-
             // Volume controls
             (_, _, KeyCode::Media(MediaKeyCode::LowerVolume))
             | (_, KeyModifiers::CONTROL, KeyCode::Char('j'))
@@ -935,7 +787,121 @@ impl Player<'_> {
             (_, KeyModifiers::NONE, KeyCode::Char('r')) => {
                 self.model.update(Message::CycleRepeatMode).await;
             }
-            (Focus::Library, mods, KeyCode::Enter) => {
+
+            (Focus::Sidebar, _, _) => self.handle_sidebar_event(key_event).await,
+            (Focus::Library, _, _) => self.handle_library_event(key_event).await,
+            (Focus::SearchResults, _, _) => self.handle_search_results_event(key_event).await,
+
+            _ => {}
+        }
+    }
+
+    async fn handle_sidebar_event(&mut self, key_event: KeyEvent) {
+        match (key_event.modifiers, key_event.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('h'))
+            | (KeyModifiers::CONTROL, KeyCode::Left) => {
+                self.model.update(Message::FocusLibrary).await;
+            }
+
+            // Sidebar queue navigation
+            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+                let row = match self.model.sidebar_table_state.selected() {
+                    Some(i) => {
+                        if i >= self.model.playback_state.queue.lock().unwrap().len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSidebarQueueRow(row)).await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+                let row = match self.model.sidebar_table_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.model.playback_state.queue.lock().unwrap().len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSidebarQueueRow(row)).await;
+            }
+            (_, KeyCode::Home) => {
+                self.model.update(Message::SelectSidebarQueueRow(0)).await;
+            }
+            (_, KeyCode::End) => {
+                let len = self.model.playback_state.queue.lock().unwrap().len();
+                self.model
+                    .update(Message::SelectSidebarQueueRow(len - 1))
+                    .await;
+            }
+
+            (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                if let Some(index) = self.model.sidebar_table_state.selected() {
+                    self.model.update(Message::RemoveFromQueue(index)).await;
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    async fn handle_library_event(&mut self, key_event: KeyEvent) {
+        match (key_event.modifiers, key_event.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('l'))
+            | (KeyModifiers::CONTROL, KeyCode::Right) => {
+                self.model.update(Message::FocusSidebar).await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('/')) => {
+                self.model.update(Message::FocusSearchBar).await;
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+                self.model.update(Message::ShowSearchResults).await;
+            }
+            // Library navigation
+            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+                let row = match self.model.library_table_state.selected() {
+                    Some(i) => {
+                        if i >= self.model.tracks.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectLibraryRow(row)).await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+                let row = match self.model.library_table_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.model.tracks.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectLibraryRow(row)).await;
+            }
+            (_, KeyCode::Home) => {
+                self.model.update(Message::SelectLibraryRow(0)).await;
+            }
+            (_, KeyCode::End) => {
+                self.model
+                    .update(Message::SelectLibraryRow(self.model.tracks.len() - 1))
+                    .await;
+            }
+            (mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.library_table_state.selected() {
                     let track = self
                         .model
@@ -955,7 +921,59 @@ impl Player<'_> {
                     }
                 }
             }
-            (Focus::SearchResults, mods, KeyCode::Enter) => {
+            _ => {}
+        }
+    }
+
+    async fn handle_search_results_event(&mut self, key_event: KeyEvent) {
+        match (key_event.modifiers, key_event.code) {
+            (_, KeyCode::Esc) => {
+                self.model.update(Message::FocusLibrary).await;
+            }
+
+            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+                let row = match self.model.search_results_table_state.selected() {
+                    Some(i) => {
+                        if i >= self.model.search_state.results.len() - 1 {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSearchResultRow(row)).await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+                let row = match self.model.search_results_table_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.model.search_state.results.len() - 1
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+
+                self.model.update(Message::SelectSearchResultRow(row)).await;
+            }
+
+            (_, KeyCode::Home) => {
+                self.model.update(Message::SelectSearchResultRow(0)).await;
+            }
+            (_, KeyCode::End) => {
+                self.model
+                    .update(Message::SelectSearchResultRow(
+                        self.model.search_state.results.len() - 1,
+                    ))
+                    .await;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('/')) => {
+                self.model.update(Message::FocusSearchBar).await;
+            }
+            (mods, KeyCode::Enter) => {
                 if let Some(index) = self.model.search_results_table_state.selected() {
                     let track = self
                         .model
@@ -976,6 +994,7 @@ impl Player<'_> {
                     }
                 }
             }
+
             _ => {}
         }
     }
