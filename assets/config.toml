@@ -1,2 +1,3 @@
 library_root = "~/music"
 theme = "default"
+show_track_art = true

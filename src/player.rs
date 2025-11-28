@@ -229,6 +229,8 @@ impl Model<'_> {
         model.theme = Theme::get_theme_by_name(&config.theme)
             .unwrap_or_else(|_| panic!("Couldn't find theme: {}", config.theme));
 
+        model.playback_state.settings.show_track_art = config.show_track_art;
+
         Ok(model)
     }
 

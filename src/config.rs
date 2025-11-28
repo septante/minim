@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Config {
     pub library_root: PathBuf,
     pub theme: String,
+    pub show_track_art: bool,
 }
 
 impl Config {
@@ -34,6 +35,7 @@ impl Default for Config {
         Self {
             library_root: dirs::audio_dir().unwrap(),
             theme: "default".to_owned(),
+            show_track_art: true,
         }
     }
 }
