@@ -691,45 +691,6 @@ impl Player<'_> {
 
     async fn handle_events(&mut self) -> std::io::Result<()> {
         match (&self.model.focus, event::read()?) {
-            (Focus::SearchInput, event) => match event {
-                Event::Key(key_event) if key_event.code == KeyCode::Esc => {
-                    self.model.update(Message::FocusLibrary).await;
-                }
-                Event::Key(key_event) if key_event.code == KeyCode::Enter => {
-                    self.model.update(Message::ShowSearchResults).await;
-                }
-                _ => {
-                    self.model.search_bar.input(event);
-
-                    // Update matcher. Note that this is NOT compatible with the upstream `nucleo`
-                    // library behavior, and instead relies on a fork that OR's matches together
-                    // See https://github.com/helix-editor/nucleo/issues/23#issuecomment-2643833781
-                    // and https://github.com/helix-editor/nucleo/pull/53 for details
-                    for column in 0..self.model.search_state.columns_to_search.len() {
-                        self.model.search_state.matcher.pattern.reparse(
-                            column,
-                            self.model
-                                .search_bar
-                                .lines()
-                                .first()
-                                .expect("Can't be empty"),
-                            CaseMatching::Ignore,
-                            Normalization::Smart,
-                            false,
-                        );
-                    }
-
-                    // Update results
-                    let items = self.model.search_state.matcher.snapshot().matched_items(..);
-                    let tracks = items.map(|item| item.data);
-                    self.model.search_state.results = tracks.cloned().collect();
-
-                    self.model.search_results_scrollbar_state = self
-                        .model
-                        .search_results_scrollbar_state
-                        .content_length(self.model.search_state.results.len());
-                }
-            },
             // it's important to check that the event is a key press event as
             // crossterm also emits key release and repeat events on Windows.
             (_, Event::Key(key_event)) if key_event.kind == KeyEventKind::Press => {
@@ -742,6 +703,8 @@ impl Player<'_> {
 
     async fn handle_key_event(&mut self, key_event: KeyEvent) {
         match (&self.model.focus, key_event.modifiers, key_event.code) {
+            (Focus::SearchInput, _, _) => self.handle_search_input_event(key_event).await,
+
             (_, _, _) if self.model.show_help => {
                 self.model.update(Message::ToggleHelp).await;
             }
@@ -922,6 +885,48 @@ impl Player<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    async fn handle_search_input_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Esc => {
+                self.model.update(Message::FocusLibrary).await;
+            }
+            KeyCode::Enter => {
+                self.model.update(Message::ShowSearchResults).await;
+            }
+            _ => {
+                self.model.search_bar.input(key_event);
+
+                // Update matcher. Note that this is NOT compatible with the upstream `nucleo`
+                // library behavior, and instead relies on a fork that OR's matches together
+                // See https://github.com/helix-editor/nucleo/issues/23#issuecomment-2643833781
+                // and https://github.com/helix-editor/nucleo/pull/53 for details
+                for column in 0..self.model.search_state.columns_to_search.len() {
+                    self.model.search_state.matcher.pattern.reparse(
+                        column,
+                        self.model
+                            .search_bar
+                            .lines()
+                            .first()
+                            .expect("Can't be empty"),
+                        CaseMatching::Ignore,
+                        Normalization::Smart,
+                        false,
+                    );
+                }
+
+                // Update results
+                let items = self.model.search_state.matcher.snapshot().matched_items(..);
+                let tracks = items.map(|item| item.data);
+                self.model.search_state.results = tracks.cloned().collect();
+
+                self.model.search_results_scrollbar_state = self
+                    .model
+                    .search_results_scrollbar_state
+                    .content_length(self.model.search_state.results.len());
+            }
         }
     }
 
