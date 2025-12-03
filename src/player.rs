@@ -540,7 +540,7 @@ impl Player<'_> {
     pub async fn new(args: Args) -> Result<Self> {
         paths::create_config_files()?;
 
-        let config = if let Ok(path) = crate::paths::config_file().ok_or(eyre!(""))
+        let mut config = if let Ok(path) = crate::paths::config_file().ok_or(eyre!(""))
             && let Ok(config) = Config::load_from_file(&path)
         {
             config
@@ -558,6 +558,10 @@ impl Player<'_> {
                 ..Default::default()
             }
         };
+
+        if let Some(ref dir) = args.dir {
+            config.library_root = dir.clone();
+        }
 
         let model = Model::from_config(&config)?;
 
